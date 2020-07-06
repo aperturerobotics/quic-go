@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"time"
 
-	"google.golang.org/protobuf/proto"
+	proto "github.com/golang/protobuf/proto"
 
 	"github.com/lucas-clemente/quic-go/internal/protocol"
 	"github.com/lucas-clemente/quic-go/internal/wire"
