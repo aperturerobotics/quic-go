@@ -17,5 +17,5 @@ require (
 	golang.org/x/crypto v0.0.0-20200423211502-4bdfaf469ed5
 	golang.org/x/net v0.0.0-20190404232315-eb5bcb51f2a3
 	golang.org/x/sync v0.0.0-20190423024810-112230192c58
-	google.golang.org/protobuf v1.23.0
+	golang.org/x/xerrors v0.0.0-20191204190536-9bdfabe68543 // indirect
 )
