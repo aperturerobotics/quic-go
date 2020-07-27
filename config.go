@@ -80,6 +80,10 @@ func populateConfig(config *Config, defaultConnIDLen int) *Config {
 	if config.MaxIdleTimeout != 0 {
 		idleTimeout = config.MaxIdleTimeout
 	}
+	disableIdleTimeout := protocol.DefaultDisableIdleTimeout
+	if config.DisableIdleTimeout {
+		disableIdleTimeout = true
+	}
 	initialStreamReceiveWindow := config.InitialStreamReceiveWindow
 	if initialStreamReceiveWindow == 0 {
 		initialStreamReceiveWindow = protocol.DefaultInitialMaxStreamData
@@ -120,6 +124,7 @@ func populateConfig(config *Config, defaultConnIDLen int) *Config {
 		MaxTokenAge:                      config.MaxTokenAge,
 		MaxRetryTokenAge:                 config.MaxRetryTokenAge,
 		RequireAddressValidation:         config.RequireAddressValidation,
+		DisableIdleTimeout:               disableIdleTimeout,
 		KeepAlivePeriod:                  config.KeepAlivePeriod,
 		InitialStreamReceiveWindow:       initialStreamReceiveWindow,
 		MaxStreamReceiveWindow:           maxStreamReceiveWindow,
@@ -136,6 +141,6 @@ func populateConfig(config *Config, defaultConnIDLen int) *Config {
 		DisablePathMTUDiscovery:          config.DisablePathMTUDiscovery,
 		DisableVersionNegotiationPackets: config.DisableVersionNegotiationPackets,
 		Allow0RTT:                        config.Allow0RTT,
-		Tracer:                           config.Tracer,
+		Logger:                           config.Logger,
 	}
 }

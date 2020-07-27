@@ -88,8 +88,7 @@ func main() {
 		},
 		false,
 		utils.NewRTTStats(),
-		nil,
-		utils.DefaultLogger.WithPrefix("client"),
+		utils.NewDefaultLogger(nil).WithPrefix("client"),
 		protocol.VersionTLS,
 	)
 
@@ -107,8 +106,7 @@ func main() {
 		config,
 		nil,
 		utils.NewRTTStats(),
-		nil,
-		utils.DefaultLogger.WithPrefix("server"),
+		utils.NewDefaultLogger(nil).WithPrefix("server"),
 		protocol.VersionTLS,
 	)
 
