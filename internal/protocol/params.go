@@ -102,6 +102,9 @@ const MinRemoteIdleTimeout = 5 * time.Second
 // DefaultIdleTimeout is the default idle timeout
 const DefaultIdleTimeout = 30 * time.Second
 
+// DefaultDisableIdleTimeout is the default value for disabling the idle timeout.
+const DefaultDisableIdleTimeout = false
+
 // DefaultHandshakeIdleTimeout is the default idle timeout used before handshake completion.
 const DefaultHandshakeIdleTimeout = 5 * time.Second
 

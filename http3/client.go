@@ -80,7 +80,7 @@ func newClient(
 	}
 	quicConfig.MaxIncomingStreams = -1 // don't allow any bidirectional streams
 	quicConfig.EnableDatagrams = opts.EnableDatagram
-	logger := utils.DefaultLogger.WithPrefix("h3 client")
+	logger := utils.NewDefaultLogger(nil).WithPrefix("h3 client")
 
 	if tlsConf == nil {
 		tlsConf = &tls.Config{}

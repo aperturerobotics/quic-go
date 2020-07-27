@@ -218,7 +218,7 @@ func (s *Server) serveImpl(startListener func() (quic.EarlyListener, error)) err
 		return errors.New("use of http3.Server without http.Server")
 	}
 	s.loggerOnce.Do(func() {
-		s.logger = utils.DefaultLogger.WithPrefix("server")
+		s.logger = utils.NewDefaultLogger(nil).WithPrefix("server")
 	})
 
 	ln, err := startListener()

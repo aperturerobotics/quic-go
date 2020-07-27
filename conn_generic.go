@@ -1,5 +1,5 @@
-//go:build !darwin && !linux && !freebsd && !windows
-// +build !darwin,!linux,!freebsd,!windows
+//go:build (!darwin && !linux && !freebsd && !windows) || js
+// +build !darwin,!linux,!freebsd,!windows js
 
 package quic
 

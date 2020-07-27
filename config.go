@@ -71,6 +71,10 @@ func populateConfig(config *Config) *Config {
 	if config.MaxIdleTimeout != 0 {
 		idleTimeout = config.MaxIdleTimeout
 	}
+	disableIdleTimeout := protocol.DefaultDisableIdleTimeout
+	if config.DisableIdleTimeout {
+		disableIdleTimeout = true
+	}
 	initialStreamReceiveWindow := config.InitialStreamReceiveWindow
 	if initialStreamReceiveWindow == 0 {
 		initialStreamReceiveWindow = protocol.DefaultInitialMaxStreamData
@@ -104,6 +108,7 @@ func populateConfig(config *Config) *Config {
 		Versions:                         versions,
 		HandshakeIdleTimeout:             handshakeIdleTimeout,
 		MaxIdleTimeout:                   idleTimeout,
+		DisableIdleTimeout:               disableIdleTimeout,
 		AcceptToken:                      config.AcceptToken,
 		KeepAlive:                        config.KeepAlive,
 		InitialStreamReceiveWindow:       initialStreamReceiveWindow,
@@ -119,6 +124,6 @@ func populateConfig(config *Config) *Config {
 		EnableDatagrams:                  config.EnableDatagrams,
 		DisablePathMTUDiscovery:          config.DisablePathMTUDiscovery,
 		DisableVersionNegotiationPackets: config.DisableVersionNegotiationPackets,
-		Tracer:                           config.Tracer,
+		Logger:                           config.Logger,
 	}
 }

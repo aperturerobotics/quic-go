@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/lucas-clemente/quic-go/internal/protocol"
-	"github.com/lucas-clemente/quic-go/internal/utils"
 )
 
 type connection interface {
@@ -27,28 +26,6 @@ type OOBCapablePacketConn interface {
 }
 
 var _ OOBCapablePacketConn = &net.UDPConn{}
-
-func wrapConn(pc net.PacketConn) (connection, error) {
-	conn, ok := pc.(interface {
-		SyscallConn() (syscall.RawConn, error)
-	})
-	if ok {
-		rawConn, err := conn.SyscallConn()
-		if err != nil {
-			return nil, err
-		}
-		err = setDF(rawConn)
-		if err != nil {
-			return nil, err
-		}
-	}
-	c, ok := pc.(OOBCapablePacketConn)
-	if !ok {
-		utils.DefaultLogger.Infof("PacketConn is not a net.UDPConn. Disabling optimizations possible on UDP connections.")
-		return &basicConn{PacketConn: pc}, nil
-	}
-	return newConn(c)
-}
 
 type basicConn struct {
 	net.PacketConn
