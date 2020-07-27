@@ -10,8 +10,6 @@ import (
 	"github.com/lucas-clemente/quic-go/internal/qerr"
 	"github.com/lucas-clemente/quic-go/internal/utils"
 	"github.com/lucas-clemente/quic-go/internal/wire"
-	"github.com/lucas-clemente/quic-go/logging"
-	"github.com/lucas-clemente/quic-go/quictrace"
 )
 
 const (
@@ -83,9 +81,7 @@ type sentPacketHandler struct {
 
 	perspective protocol.Perspective
 
-	traceCallback func(quictrace.Event)
-	tracer        logging.ConnectionTracer
-	logger        utils.Logger
+	logger utils.Logger
 }
 
 var (
@@ -97,15 +93,12 @@ func newSentPacketHandler(
 	initialPacketNumber protocol.PacketNumber,
 	rttStats *utils.RTTStats,
 	pers protocol.Perspective,
-	traceCallback func(quictrace.Event),
-	tracer logging.ConnectionTracer,
 	logger utils.Logger,
 ) *sentPacketHandler {
 	congestion := congestion.NewCubicSender(
 		congestion.DefaultClock{},
 		rttStats,
 		true, // use Reno
-		tracer,
 	)
 
 	return &sentPacketHandler{
@@ -117,8 +110,6 @@ func newSentPacketHandler(
 		rttStats:                       rttStats,
 		congestion:                     congestion,
 		perspective:                    pers,
-		traceCallback:                  traceCallback,
-		tracer:                         tracer,
 		logger:                         logger,
 	}
 }
@@ -181,9 +172,6 @@ func (h *sentPacketHandler) dropPackets(encLevel protocol.EncryptionLevel) {
 	default:
 		panic(fmt.Sprintf("Cannot drop keys for encryption level %s", encLevel))
 	}
-	if h.tracer != nil && h.ptoCount != 0 {
-		h.tracer.UpdatedPTOCount(0)
-	}
 	h.ptoCount = 0
 	h.numProbesToSend = 0
 	h.ptoMode = SendNone
@@ -219,9 +207,6 @@ func (h *sentPacketHandler) SentPacket(packet *Packet) {
 	}
 	isAckEliciting := h.sentPacketImpl(packet)
 	h.getPacketNumberSpace(packet.EncryptionLevel).history.SentPacket(packet, isAckEliciting)
-	if h.tracer != nil && isAckEliciting {
-		h.tracer.UpdatedMetrics(h.rttStats, h.congestion.GetCongestionWindow(), h.bytesInFlight, h.packetsInFlight())
-	}
 	if isAckEliciting || !h.peerCompletedAddressValidation {
 		h.setLossDetectionTimer()
 	}
@@ -302,9 +287,6 @@ func (h *sentPacketHandler) ReceivedAck(ack *wire.AckFrame, encLevel protocol.En
 				h.logger.Debugf("\tupdated RTT: %s (σ: %s)", h.rttStats.SmoothedRTT(), h.rttStats.MeanDeviation())
 			}
 			h.congestion.MaybeExitSlowStart()
-			if h.tracer != nil {
-				h.tracer.UpdatedMetrics(h.rttStats, h.congestion.GetCongestionWindow(), h.bytesInFlight, h.packetsInFlight())
-			}
 		}
 	}
 	lostPackets, err := h.detectLostPackets(rcvTime, encLevel)
@@ -326,9 +308,6 @@ func (h *sentPacketHandler) ReceivedAck(ack *wire.AckFrame, encLevel protocol.En
 
 	// Reset the pto_count unless the client is unsure if the server has validated the client's address.
 	if h.peerCompletedAddressValidation {
-		if h.tracer != nil && h.ptoCount != 0 {
-			h.tracer.UpdatedPTOCount(0)
-		}
 		h.ptoCount = 0
 	}
 	h.numProbesToSend = 0
@@ -480,13 +459,11 @@ func (h *sentPacketHandler) hasOutstandingPackets() bool {
 }
 
 func (h *sentPacketHandler) setLossDetectionTimer() {
-	oldAlarm := h.alarm // only needed in case tracing is enabled
+	// oldAlarm := h.alarm // only needed in case tracing is enabled
 	if lossTime, encLevel := h.getLossTimeAndSpace(); !lossTime.IsZero() {
 		// Early retransmit timer or time loss detection.
 		h.alarm = lossTime
-		if h.tracer != nil && h.alarm != oldAlarm {
-			h.tracer.SetLossTimer(logging.TimerTypeACK, encLevel, h.alarm)
-		}
+		_ = encLevel
 		return
 	}
 
@@ -494,18 +471,13 @@ func (h *sentPacketHandler) setLossDetectionTimer() {
 	if !h.hasOutstandingPackets() && h.peerCompletedAddressValidation {
 		h.alarm = time.Time{}
 		h.logger.Debugf("Canceling loss detection timer. No packets in flight.")
-		if h.tracer != nil && !oldAlarm.IsZero() {
-			h.tracer.LossTimerCanceled()
-		}
 		return
 	}
 
 	// PTO alarm
 	ptoTime, encLevel := h.getPTOTimeAndSpace()
+	_ = encLevel
 	h.alarm = ptoTime
-	if h.tracer != nil && h.alarm != oldAlarm {
-		h.tracer.SetLossTimer(logging.TimerTypePTO, encLevel, h.alarm)
-	}
 }
 
 func (h *sentPacketHandler) detectLostPackets(now time.Time, encLevel protocol.EncryptionLevel) ([]*Packet, error) {
@@ -532,14 +504,8 @@ func (h *sentPacketHandler) detectLostPackets(now time.Time, encLevel protocol.E
 
 		if packet.SendTime.Before(lostSendTime) {
 			lostPackets = append(lostPackets, packet)
-			if h.tracer != nil {
-				h.tracer.LostPacket(packet.EncryptionLevel, packet.PacketNumber, logging.PacketLossTimeThreshold)
-			}
 		} else if pnSpace.largestAcked >= packet.PacketNumber+packetThreshold {
 			lostPackets = append(lostPackets, packet)
-			if h.tracer != nil {
-				h.tracer.LostPacket(packet.EncryptionLevel, packet.PacketNumber, logging.PacketLossReorderingThreshold)
-			}
 		} else if pnSpace.lossTime.IsZero() {
 			// Note: This conditional is only entered once per call
 			lossTime := packet.SendTime.Add(lossDelay)
@@ -566,21 +532,6 @@ func (h *sentPacketHandler) detectLostPackets(now time.Time, encLevel protocol.E
 		h.queueFramesForRetransmission(p)
 		// the bytes in flight need to be reduced no matter if this packet will be retransmitted
 		h.removeFromBytesInFlight(p)
-		if h.traceCallback != nil {
-			frames := make([]wire.Frame, 0, len(p.Frames))
-			for _, f := range p.Frames {
-				frames = append(frames, f.Frame)
-			}
-			h.traceCallback(quictrace.Event{
-				Time:            now,
-				EventType:       quictrace.PacketLost,
-				EncryptionLevel: p.EncryptionLevel,
-				PacketNumber:    p.PacketNumber,
-				PacketSize:      p.Length,
-				Frames:          frames,
-				TransportState:  h.GetStats(),
-			})
-		}
 	}
 	return lostPackets, nil
 }
@@ -605,9 +556,6 @@ func (h *sentPacketHandler) onVerifiedLossDetectionTimeout() error {
 		if h.logger.Debug() {
 			h.logger.Debugf("Loss detection alarm fired in loss timer mode. Loss time: %s", earliestLossTime)
 		}
-		if h.tracer != nil {
-			h.tracer.LossTimerExpired(logging.TimerTypeACK, encLevel)
-		}
 		// Early retransmit or time loss detection
 		priorInFlight := h.bytesInFlight
 		lostPackets, err := h.detectLostPackets(time.Now(), encLevel)
@@ -626,10 +574,6 @@ func (h *sentPacketHandler) onVerifiedLossDetectionTimeout() error {
 		_, encLevel = h.getPTOTimeAndSpace()
 		if h.logger.Debug() {
 			h.logger.Debugf("Loss detection alarm for %s fired in PTO mode. PTO count: %d", encLevel, h.ptoCount)
-		}
-		if h.tracer != nil {
-			h.tracer.LossTimerExpired(logging.TimerTypePTO, encLevel)
-			h.tracer.UpdatedPTOCount(h.ptoCount)
 		}
 		h.numProbesToSend += 2
 		//nolint:exhaustive // We never arm a PTO timer for 0-RTT packets.
@@ -797,20 +741,11 @@ func (h *sentPacketHandler) ResetForRetry() error {
 		if h.logger.Debug() {
 			h.logger.Debugf("\tupdated RTT: %s (σ: %s)", h.rttStats.SmoothedRTT(), h.rttStats.MeanDeviation())
 		}
-		if h.tracer != nil {
-			h.tracer.UpdatedMetrics(h.rttStats, h.congestion.GetCongestionWindow(), h.bytesInFlight, h.packetsInFlight())
-		}
 	}
 	h.initialPackets = newPacketNumberSpace(h.initialPackets.pns.Pop(), h.rttStats)
 	h.appDataPackets = newPacketNumberSpace(h.appDataPackets.pns.Pop(), h.rttStats)
-	oldAlarm := h.alarm
+	// oldAlarm := h.alarm
 	h.alarm = time.Time{}
-	if h.tracer != nil {
-		h.tracer.UpdatedPTOCount(0)
-		if !oldAlarm.IsZero() {
-			h.tracer.LossTimerCanceled()
-		}
-	}
 	h.ptoCount = 0
 	return nil
 }
@@ -820,16 +755,4 @@ func (h *sentPacketHandler) SetHandshakeConfirmed() {
 	// We don't send PTOs for application data packets before the handshake completes.
 	// Make sure the timer is armed now, if necessary.
 	h.setLossDetectionTimer()
-}
-
-func (h *sentPacketHandler) GetStats() *quictrace.TransportState {
-	return &quictrace.TransportState{
-		MinRTT:           h.rttStats.MinRTT(),
-		SmoothedRTT:      h.rttStats.SmoothedRTT(),
-		LatestRTT:        h.rttStats.LatestRTT(),
-		BytesInFlight:    h.bytesInFlight,
-		CongestionWindow: h.congestion.GetCongestionWindow(),
-		InSlowStart:      h.congestion.InSlowStart(),
-		InRecovery:       h.congestion.InRecovery(),
-	}
 }

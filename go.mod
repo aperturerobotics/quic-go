@@ -17,6 +17,7 @@ require (
 	github.com/marten-seemann/qtls-go1-15 v0.1.1
 	github.com/onsi/ginkgo v1.14.0
 	github.com/onsi/gomega v1.10.1
+	github.com/sirupsen/logrus v1.6.0
 	go.opencensus.io v0.22.2
 	golang.org/x/crypto v0.0.0-20200622213623-75b288015ac9
 	golang.org/x/net v0.0.0-20200707034311-ab3426394381

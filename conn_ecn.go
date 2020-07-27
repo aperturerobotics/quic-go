@@ -41,11 +41,11 @@ func newConn(c ECNCapablePacketConn) (*ecnConn, error) {
 	}
 	switch {
 	case errIPv4 == nil && errIPv6 == nil:
-		utils.DefaultLogger.Debugf("Activating reading of ECN bits for IPv4 and IPv6.")
+		utils.NewDefaultLogger(nil).Debugf("Activating reading of ECN bits for IPv4 and IPv6.")
 	case errIPv4 == nil && errIPv6 != nil:
-		utils.DefaultLogger.Debugf("Activating reading of ECN bits for IPv4.")
+		utils.NewDefaultLogger(nil).Debugf("Activating reading of ECN bits for IPv4.")
 	case errIPv4 != nil && errIPv6 == nil:
-		utils.DefaultLogger.Debugf("Activating reading of ECN bits for IPv6.")
+		utils.NewDefaultLogger(nil).Debugf("Activating reading of ECN bits for IPv6.")
 	case errIPv4 != nil && errIPv6 != nil:
 		return nil, errors.New("activating ECN failed for both IPv4 and IPv6")
 	}

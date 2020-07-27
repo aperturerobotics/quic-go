@@ -76,7 +76,7 @@ func newClient(
 		return nil, errors.New("can only use a single QUIC version for dialing a HTTP/3 connection")
 	}
 	quicConfig.MaxIncomingStreams = -1 // don't allow any bidirectional streams
-	logger := utils.DefaultLogger.WithPrefix("h3 client")
+	logger := utils.NewDefaultLogger(nil).WithPrefix("h3 client")
 
 	if tlsConf == nil {
 		tlsConf = &tls.Config{}

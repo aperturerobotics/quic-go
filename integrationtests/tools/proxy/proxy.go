@@ -191,7 +191,7 @@ func NewQuicProxy(local string, opts *Opts) (*QuicProxy, error) {
 		serverAddr:  raddr,
 		dropPacket:  packetDropper,
 		delayPacket: packetDelayer,
-		logger:      utils.DefaultLogger.WithPrefix("proxy"),
+		logger:      utils.NewDefaultLogger(nil).WithPrefix("proxy"),
 	}
 
 	p.logger.Debugf("Starting UDP Proxy %s <-> %s", conn.LocalAddr(), raddr)

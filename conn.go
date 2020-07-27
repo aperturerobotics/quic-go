@@ -30,7 +30,7 @@ var _ ECNCapablePacketConn = &net.UDPConn{}
 func wrapConn(pc net.PacketConn) (connection, error) {
 	c, ok := pc.(ECNCapablePacketConn)
 	if !ok {
-		utils.DefaultLogger.Infof("PacketConn is not a net.UDPConn. Disabling optimizations possible on UDP connections.")
+		utils.NewDefaultLogger(nil).Infof("PacketConn is not a net.UDPConn. Disabling optimizations possible on UDP connections.")
 		return &basicConn{PacketConn: pc}, nil
 	}
 	return newConn(c)

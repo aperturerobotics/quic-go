@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bufio"
 	"crypto/md5"
 	"errors"
 	"flag"
@@ -11,7 +10,6 @@ import (
 	"log"
 	"mime/multipart"
 	"net/http"
-	"os"
 	"strconv"
 	"strings"
 	"sync"
@@ -22,9 +20,6 @@ import (
 	"github.com/lucas-clemente/quic-go/http3"
 	"github.com/lucas-clemente/quic-go/internal/testdata"
 	"github.com/lucas-clemente/quic-go/internal/utils"
-	"github.com/lucas-clemente/quic-go/logging"
-	"github.com/lucas-clemente/quic-go/qlog"
-	"github.com/lucas-clemente/quic-go/quictrace"
 )
 
 type binds []string
@@ -54,45 +49,7 @@ func generatePRData(l int) []byte {
 	return res
 }
 
-var tracer quictrace.Tracer
-
-func init() {
-	tracer = quictrace.NewTracer()
-}
-
-func exportTraces() error {
-	traces := tracer.GetAllTraces()
-	if len(traces) != 1 {
-		return errors.New("expected exactly one trace")
-	}
-	for _, trace := range traces {
-		f, err := os.Create("trace.qtr")
-		if err != nil {
-			return err
-		}
-		if _, err := f.Write(trace); err != nil {
-			return err
-		}
-		f.Close()
-		fmt.Println("Wrote trace to", f.Name())
-	}
-	return nil
-}
-
-type tracingHandler struct {
-	handler http.Handler
-}
-
-var _ http.Handler = &tracingHandler{}
-
-func (h *tracingHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	h.handler.ServeHTTP(w, r)
-	if err := exportTraces(); err != nil {
-		log.Fatal(err)
-	}
-}
-
-func setupHandler(www string, trace bool) http.Handler {
+func setupHandler(www string) http.Handler {
 	mux := http.NewServeMux()
 
 	if len(www) > 0 {
@@ -161,7 +118,7 @@ func setupHandler(www string, trace bool) http.Handler {
 				}
 			}
 			if err != nil {
-				utils.DefaultLogger.Infof("Error receiving upload: %#v", err)
+				utils.NewDefaultLogger(nil).Infof("Error receiving upload: %#v", err)
 			}
 		}
 		io.WriteString(w, `<html><body><form action="/demo/upload" method="post" enctype="multipart/form-data">
@@ -170,10 +127,7 @@ func setupHandler(www string, trace bool) http.Handler {
 			</form></body></html>`)
 	})
 
-	if !trace {
-		return mux
-	}
-	return &tracingHandler{handler: mux}
+	return mux
 }
 
 func main() {
@@ -188,11 +142,9 @@ func main() {
 	flag.Var(&bs, "bind", "bind to")
 	www := flag.String("www", "", "www data")
 	tcp := flag.Bool("tcp", false, "also listen on TCP")
-	trace := flag.Bool("trace", false, "enable quic-trace")
-	enableQlog := flag.Bool("qlog", false, "output a qlog (in the same directory)")
 	flag.Parse()
 
-	logger := utils.DefaultLogger
+	logger := utils.NewDefaultLogger(nil)
 
 	if *verbose {
 		logger.SetLogLevel(utils.LogLevelDebug)
@@ -205,22 +157,8 @@ func main() {
 		bs = binds{"localhost:6121"}
 	}
 
-	handler := setupHandler(*www, *trace)
+	handler := setupHandler(*www)
 	quicConf := &quic.Config{}
-	if *trace {
-		quicConf.QuicTracer = tracer
-	}
-	if *enableQlog {
-		quicConf.Tracer = qlog.NewTracer(func(_ logging.Perspective, connID []byte) io.WriteCloser {
-			filename := fmt.Sprintf("server_%x.qlog", connID)
-			f, err := os.Create(filename)
-			if err != nil {
-				log.Fatal(err)
-			}
-			log.Printf("Creating qlog file %s.\n", filename)
-			return utils.NewBufferedWriteCloser(bufio.NewWriter(f), f)
-		})
-	}
 
 	var wg sync.WaitGroup
 	wg.Add(len(bs))

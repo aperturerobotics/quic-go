@@ -20,7 +20,6 @@ import (
 	"github.com/lucas-clemente/quic-go/internal/protocol"
 	"github.com/lucas-clemente/quic-go/interop/http09"
 	"github.com/lucas-clemente/quic-go/interop/utils"
-	"github.com/lucas-clemente/quic-go/qlog"
 )
 
 var errUnsupported = errors.New("unsupported test case")
@@ -64,11 +63,7 @@ func runTestcase(testcase string) error {
 	flag.Parse()
 	urls := flag.Args()
 
-	getLogWriter, err := utils.GetQLOGWriter()
-	if err != nil {
-		return err
-	}
-	quicConf := &quic.Config{Tracer: qlog.NewTracer(getLogWriter)}
+	quicConf := &quic.Config{}
 
 	if testcase == "http3" {
 		r := &http3.RoundTripper{
