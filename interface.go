@@ -6,7 +6,7 @@ import (
 	"net"
 	"time"
 
-	"github.com/lucas-clemente/quic-go/logging"
+	"github.com/sirupsen/logrus"
 
 	"github.com/lucas-clemente/quic-go/internal/handshake"
 	"github.com/lucas-clemente/quic-go/internal/protocol"
@@ -259,7 +259,9 @@ type Config struct {
 	// QUIC Event Tracer.
 	// Warning: Experimental. This API should not be considered stable and will change soon.
 	QuicTracer quictrace.Tracer
-	Tracer     logging.Tracer
+
+	// Logger is the logger to use.
+	Logger *logrus.Entry
 }
 
 // A Listener for incoming QUIC connections

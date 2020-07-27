@@ -13,7 +13,6 @@ import (
 	"github.com/lucas-clemente/quic-go/internal/protocol"
 	"github.com/lucas-clemente/quic-go/internal/utils"
 	"github.com/lucas-clemente/quic-go/internal/wire"
-	"github.com/lucas-clemente/quic-go/logging"
 )
 
 type statelessResetErr struct {
@@ -47,7 +46,6 @@ type packetHandlerMap struct {
 	statelessResetMutex   sync.Mutex
 	statelessResetHasher  hash.Hash
 
-	tracer logging.Tracer
 	logger utils.Logger
 }
 
@@ -57,7 +55,6 @@ func newPacketHandlerMap(
 	conn net.PacketConn,
 	connIDLen int,
 	statelessResetKey []byte,
-	tracer logging.Tracer,
 	logger utils.Logger,
 ) packetHandlerManager {
 	m := &packetHandlerMap{
@@ -69,7 +66,6 @@ func newPacketHandlerMap(
 		deleteRetiredSessionsAfter: protocol.RetiredConnectionIDDeleteTimeout,
 		statelessResetEnabled:      len(statelessResetKey) > 0,
 		statelessResetHasher:       hmac.New(sha256.New, statelessResetKey),
-		tracer:                     tracer,
 		logger:                     logger,
 	}
 	go m.listen()
@@ -275,9 +271,6 @@ func (h *packetHandlerMap) handlePacket(
 	if err != nil {
 		buffer.MaybeRelease()
 		h.logger.Debugf("error parsing connection ID on packet from %s: %s", addr, err)
-		if h.tracer != nil {
-			h.tracer.DroppedPacket(addr, logging.PacketTypeNotDetermined, protocol.ByteCount(len(data)), logging.PacketDropHeaderParseError)
-		}
 		return
 	}
 	rcvTime := time.Now()

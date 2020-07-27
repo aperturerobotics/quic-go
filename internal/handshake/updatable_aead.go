@@ -13,7 +13,6 @@ import (
 	"github.com/lucas-clemente/quic-go/internal/qerr"
 	"github.com/lucas-clemente/quic-go/internal/qtls"
 	"github.com/lucas-clemente/quic-go/internal/utils"
-	"github.com/lucas-clemente/quic-go/logging"
 )
 
 // By setting this environment variable, the key update interval can be adjusted.
@@ -72,7 +71,6 @@ type updatableAEAD struct {
 
 	rttStats *utils.RTTStats
 
-	tracer logging.ConnectionTracer
 	logger utils.Logger
 
 	// use a single slice to avoid allocations
@@ -82,7 +80,7 @@ type updatableAEAD struct {
 var _ ShortHeaderOpener = &updatableAEAD{}
 var _ ShortHeaderSealer = &updatableAEAD{}
 
-func newUpdatableAEAD(rttStats *utils.RTTStats, tracer logging.ConnectionTracer, logger utils.Logger) *updatableAEAD {
+func newUpdatableAEAD(rttStats *utils.RTTStats, logger utils.Logger) *updatableAEAD {
 	return &updatableAEAD{
 		firstPacketNumber:       protocol.InvalidPacketNumber,
 		largestAcked:            protocol.InvalidPacketNumber,
@@ -90,7 +88,6 @@ func newUpdatableAEAD(rttStats *utils.RTTStats, tracer logging.ConnectionTracer,
 		firstSentWithCurrentKey: protocol.InvalidPacketNumber,
 		keyUpdateInterval:       keyUpdateInterval,
 		rttStats:                rttStats,
-		tracer:                  tracer,
 		logger:                  logger,
 	}
 }
@@ -181,9 +178,6 @@ func (a *updatableAEAD) Open(dst, src []byte, rcvTime time.Time, pn protocol.Pac
 		}
 		a.rollKeys(rcvTime)
 		a.logger.Debugf("Peer updated keys to %s", a.keyPhase)
-		if a.tracer != nil {
-			a.tracer.UpdatedKey(a.keyPhase, true)
-		}
 		a.firstRcvdWithCurrentKey = pn
 		return dec, err
 	}
@@ -242,9 +236,6 @@ func (a *updatableAEAD) shouldInitiateKeyUpdate() bool {
 
 func (a *updatableAEAD) KeyPhase() protocol.KeyPhaseBit {
 	if a.shouldInitiateKeyUpdate() {
-		if a.tracer != nil {
-			a.tracer.UpdatedKey(a.keyPhase, false)
-		}
 		a.rollKeys(time.Now())
 	}
 	return a.keyPhase.Bit()
