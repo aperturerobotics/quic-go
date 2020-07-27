@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"github.com/lucas-clemente/quic-go/internal/protocol"
-	"github.com/lucas-clemente/quic-go/internal/utils"
 )
 
 // OOBCapablePacketConn is a connection that allows the reading of ECN bits from the IP header.
@@ -20,28 +19,6 @@ type OOBCapablePacketConn interface {
 }
 
 var _ OOBCapablePacketConn = &net.UDPConn{}
-
-func wrapConn(pc net.PacketConn) (rawConn, error) {
-	conn, ok := pc.(interface {
-		SyscallConn() (syscall.RawConn, error)
-	})
-	if ok {
-		rawConn, err := conn.SyscallConn()
-		if err != nil {
-			return nil, err
-		}
-		err = setDF(rawConn)
-		if err != nil {
-			return nil, err
-		}
-	}
-	c, ok := pc.(OOBCapablePacketConn)
-	if !ok {
-		utils.DefaultLogger.Infof("PacketConn is not a net.UDPConn. Disabling optimizations possible on UDP connections.")
-		return &basicConn{PacketConn: pc}, nil
-	}
-	return newConn(c)
-}
 
 // The basicConn is the most trivial implementation of a connection.
 // It reads a single packet from the underlying net.PacketConn.

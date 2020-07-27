@@ -1,5 +1,5 @@
-//go:build linux
-// +build linux
+//go:build linux && !js
+// +build linux,!js
 
 package quic
 
