@@ -20,11 +20,11 @@ var _ = Describe("Stream Flow controller", func() {
 		rttStats := &utils.RTTStats{}
 		controller = &streamFlowController{
 			streamID:   10,
-			connection: NewConnectionFlowController(1000, 1000, func() {}, rttStats, utils.DefaultLogger).(*connectionFlowController),
+			connection: NewConnectionFlowController(1000, 1000, func() {}, rttStats, utils.NewDefaultLogger(nil)).(*connectionFlowController),
 		}
 		controller.maxReceiveWindowSize = 10000
 		controller.rttStats = rttStats
-		controller.logger = utils.DefaultLogger
+		controller.logger = utils.NewDefaultLogger(nil)
 		controller.queueWindowUpdate = func() { queuedWindowUpdate = true }
 	})
 
@@ -35,7 +35,7 @@ var _ = Describe("Stream Flow controller", func() {
 		const sendWindow protocol.ByteCount = 4000
 
 		It("sets the send and receive windows", func() {
-			cc := NewConnectionFlowController(0, 0, nil, nil, utils.DefaultLogger)
+			cc := NewConnectionFlowController(0, 0, nil, nil, utils.NewDefaultLogger(nil))
 			fc := NewStreamFlowController(5, cc, receiveWindow, maxReceiveWindow, sendWindow, nil, rttStats, utils.DefaultLogger).(*streamFlowController)
 			Expect(fc.streamID).To(Equal(protocol.StreamID(5)))
 			Expect(fc.receiveWindow).To(Equal(receiveWindow))

@@ -15,7 +15,6 @@ import (
 	"github.com/lucas-clemente/quic-go/internal/protocol"
 	"github.com/lucas-clemente/quic-go/internal/utils"
 	"github.com/lucas-clemente/quic-go/internal/wire"
-	"github.com/lucas-clemente/quic-go/logging"
 )
 
 type statelessResetErr struct {
@@ -83,7 +82,6 @@ type packetHandlerMap struct {
 	statelessResetMutex   sync.Mutex
 	statelessResetHasher  hash.Hash
 
-	tracer logging.Tracer
 	logger utils.Logger
 }
 
@@ -125,7 +123,6 @@ func newPacketHandlerMap(
 	c net.PacketConn,
 	connIDLen int,
 	statelessResetKey []byte,
-	tracer logging.Tracer,
 	logger utils.Logger,
 ) (packetHandlerManager, error) {
 	if err := setReceiveBuffer(c, logger); err != nil {
@@ -147,7 +144,6 @@ func newPacketHandlerMap(
 		zeroRTTQueueDuration:       protocol.Max0RTTQueueingDuration,
 		statelessResetEnabled:      len(statelessResetKey) > 0,
 		statelessResetHasher:       hmac.New(sha256.New, statelessResetKey),
-		tracer:                     tracer,
 		logger:                     logger,
 	}
 	go m.listen()
@@ -351,9 +347,6 @@ func (h *packetHandlerMap) handlePacket(p *receivedPacket) {
 	connID, err := wire.ParseConnectionID(p.data, h.connIDLen)
 	if err != nil {
 		h.logger.Debugf("error parsing connection ID on packet from %s: %s", p.remoteAddr, err)
-		if h.tracer != nil {
-			h.tracer.DroppedPacket(p.remoteAddr, logging.PacketTypeNotDetermined, p.Size(), logging.PacketDropHeaderParseError)
-		}
 		p.buffer.MaybeRelease()
 		return
 	}

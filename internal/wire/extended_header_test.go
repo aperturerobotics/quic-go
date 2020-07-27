@@ -338,7 +338,7 @@ var _ = Describe("Header", func() {
 
 		BeforeEach(func() {
 			buf = &bytes.Buffer{}
-			logger = utils.DefaultLogger
+			logger = utils.NewDefaultLogger(nil)
 			logger.SetLogLevel(utils.LogLevelDebug)
 			log.SetOutput(buf)
 		})
