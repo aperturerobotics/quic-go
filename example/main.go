@@ -1,8 +1,6 @@
 package main
 
 import (
-	"bufio"
-	"context"
 	"crypto/md5"
 	"errors"
 	"flag"
@@ -11,7 +9,6 @@ import (
 	"log"
 	"mime/multipart"
 	"net/http"
-	"os"
 	"strconv"
 	"strings"
 	"sync"
@@ -22,8 +19,6 @@ import (
 	"github.com/quic-go/quic-go/http3"
 	"github.com/quic-go/quic-go/internal/testdata"
 	"github.com/quic-go/quic-go/internal/utils"
-	"github.com/quic-go/quic-go/logging"
-	"github.com/quic-go/quic-go/qlog"
 )
 
 type binds []string
@@ -121,7 +116,9 @@ func setupHandler(www string) http.Handler {
 					err = errors.New("couldn't get uploaded file size")
 				}
 			}
-			utils.DefaultLogger.Infof("Error receiving upload: %#v", err)
+			if err != nil {
+				utils.NewDefaultLogger(nil).Infof("Error receiving upload: %#v", err)
+			}
 		}
 		io.WriteString(w, `<html><body><form action="/demo/upload" method="post" enctype="multipart/form-data">
 				<input type="file" name="uploadfile"><br>
@@ -144,10 +141,9 @@ func main() {
 	flag.Var(&bs, "bind", "bind to")
 	www := flag.String("www", "", "www data")
 	tcp := flag.Bool("tcp", false, "also listen on TCP")
-	enableQlog := flag.Bool("qlog", false, "output a qlog (in the same directory)")
 	flag.Parse()
 
-	logger := utils.DefaultLogger
+	logger := utils.NewDefaultLogger(nil)
 
 	if *verbose {
 		logger.SetLogLevel(utils.LogLevelDebug)
@@ -162,17 +158,6 @@ func main() {
 
 	handler := setupHandler(*www)
 	quicConf := &quic.Config{}
-	if *enableQlog {
-		quicConf.Tracer = func(ctx context.Context, p logging.Perspective, connID quic.ConnectionID) logging.ConnectionTracer {
-			filename := fmt.Sprintf("server_%x.qlog", connID)
-			f, err := os.Create(filename)
-			if err != nil {
-				log.Fatal(err)
-			}
-			log.Printf("Creating qlog file %s.\n", filename)
-			return qlog.NewConnectionTracer(utils.NewBufferedWriteCloser(bufio.NewWriter(f), f), p, connID)
-		}
-	}
 
 	var wg sync.WaitGroup
 	wg.Add(len(bs))

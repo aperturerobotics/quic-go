@@ -3,9 +3,6 @@
 package logging
 
 import (
-	"net"
-	"time"
-
 	"github.com/quic-go/quic-go/internal/protocol"
 	"github.com/quic-go/quic-go/internal/qerr"
 	"github.com/quic-go/quic-go/internal/utils"
@@ -96,44 +93,4 @@ type ShortHeader struct {
 	PacketNumber     PacketNumber
 	PacketNumberLen  protocol.PacketNumberLen
 	KeyPhase         KeyPhaseBit
-}
-
-// A Tracer traces events.
-type Tracer interface {
-	SentPacket(net.Addr, *Header, ByteCount, []Frame)
-	SentVersionNegotiationPacket(_ net.Addr, dest, src ArbitraryLenConnectionID, _ []VersionNumber)
-	DroppedPacket(net.Addr, PacketType, ByteCount, PacketDropReason)
-}
-
-// A ConnectionTracer records events.
-type ConnectionTracer interface {
-	StartedConnection(local, remote net.Addr, srcConnID, destConnID ConnectionID)
-	NegotiatedVersion(chosen VersionNumber, clientVersions, serverVersions []VersionNumber)
-	ClosedConnection(error)
-	SentTransportParameters(*TransportParameters)
-	ReceivedTransportParameters(*TransportParameters)
-	RestoredTransportParameters(parameters *TransportParameters) // for 0-RTT
-	SentLongHeaderPacket(hdr *ExtendedHeader, size ByteCount, ack *AckFrame, frames []Frame)
-	SentShortHeaderPacket(hdr *ShortHeader, size ByteCount, ack *AckFrame, frames []Frame)
-	ReceivedVersionNegotiationPacket(dest, src ArbitraryLenConnectionID, _ []VersionNumber)
-	ReceivedRetry(*Header)
-	ReceivedLongHeaderPacket(hdr *ExtendedHeader, size ByteCount, frames []Frame)
-	ReceivedShortHeaderPacket(hdr *ShortHeader, size ByteCount, frames []Frame)
-	BufferedPacket(PacketType, ByteCount)
-	DroppedPacket(PacketType, ByteCount, PacketDropReason)
-	UpdatedMetrics(rttStats *RTTStats, cwnd, bytesInFlight ByteCount, packetsInFlight int)
-	AcknowledgedPacket(EncryptionLevel, PacketNumber)
-	LostPacket(EncryptionLevel, PacketNumber, PacketLossReason)
-	UpdatedCongestionState(CongestionState)
-	UpdatedPTOCount(value uint32)
-	UpdatedKeyFromTLS(EncryptionLevel, Perspective)
-	UpdatedKey(generation KeyPhase, remote bool)
-	DroppedEncryptionLevel(EncryptionLevel)
-	DroppedKey(generation KeyPhase)
-	SetLossTimer(TimerType, EncryptionLevel, time.Time)
-	LossTimerExpired(TimerType, EncryptionLevel)
-	LossTimerCanceled()
-	// Close is called when the connection is closed.
-	Close()
-	Debug(name, msg string)
 }
