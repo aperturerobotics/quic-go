@@ -8,18 +8,13 @@ import (
 	"fmt"
 	"hash"
 	"io"
-	"log"
 	"net"
-	"os"
-	"strconv"
-	"strings"
 	"sync"
 	"time"
 
 	"github.com/lucas-clemente/quic-go/internal/protocol"
 	"github.com/lucas-clemente/quic-go/internal/utils"
 	"github.com/lucas-clemente/quic-go/internal/wire"
-	"github.com/lucas-clemente/quic-go/logging"
 )
 
 type zeroRTTQueue struct {
@@ -87,7 +82,6 @@ type packetHandlerMap struct {
 	statelessResetMutex   sync.Mutex
 	statelessResetHasher  hash.Hash
 
-	tracer logging.Tracer
 	logger utils.Logger
 }
 
@@ -123,25 +117,15 @@ func setReceiveBuffer(c net.PacketConn, logger utils.Logger) error {
 	return nil
 }
 
-// only print warnings about the UDP receive buffer size once
-var receiveBufferWarningOnce sync.Once
-
 func newPacketHandlerMap(
 	c net.PacketConn,
 	connIDLen int,
 	statelessResetKey []byte,
-	tracer logging.Tracer,
 	logger utils.Logger,
 ) (packetHandlerManager, error) {
 	if err := setReceiveBuffer(c, logger); err != nil {
-		if !strings.Contains(err.Error(), "use of closed network connection") {
-			receiveBufferWarningOnce.Do(func() {
-				if disable, _ := strconv.ParseBool(os.Getenv("QUIC_GO_DISABLE_RECEIVE_BUFFER_WARNING")); disable {
-					return
-				}
-				log.Printf("%s. See https://github.com/lucas-clemente/quic-go/wiki/UDP-Receive-Buffer-Size for details.", err)
-			})
-		}
+		// ignore this error, it doesn't matter for non-UDP conns.
+		_ = err
 	}
 	conn, err := wrapConn(c)
 	if err != nil {
@@ -157,20 +141,22 @@ func newPacketHandlerMap(
 		zeroRTTQueueDuration:    protocol.Max0RTTQueueingDuration,
 		statelessResetEnabled:   len(statelessResetKey) > 0,
 		statelessResetHasher:    hmac.New(sha256.New, statelessResetKey),
-		tracer:                  tracer,
 		logger:                  logger,
 	}
 	go m.listen()
 
+	// note: only run if the logger is in debug mode
 	if logger.Debug() {
 		go m.logUsage()
 	}
+
 	return m, nil
 }
 
 func (h *packetHandlerMap) logUsage() {
 	ticker := time.NewTicker(2 * time.Second)
-	var printedZero bool
+	var printedNumHandlers int
+	var printedNumTokens int
 	for {
 		select {
 		case <-h.listening:
@@ -182,14 +168,10 @@ func (h *packetHandlerMap) logUsage() {
 		numHandlers := len(h.handlers)
 		numTokens := len(h.resetTokens)
 		h.mutex.Unlock()
-		// If the number tracked handlers and tokens is zero, only print it a single time.
-		hasZero := numHandlers == 0 && numTokens == 0
-		if !hasZero || (hasZero && !printedZero) {
+		if (printedNumHandlers != numHandlers) || (printedNumTokens != numTokens) {
 			h.logger.Debugf("Tracking %d connection IDs and %d reset tokens.\n", numHandlers, numTokens)
-			printedZero = false
-			if hasZero {
-				printedZero = true
-			}
+			printedNumHandlers = numHandlers
+			printedNumTokens = numTokens
 		}
 	}
 }
@@ -242,13 +224,20 @@ func (h *packetHandlerMap) Remove(id protocol.ConnectionID) {
 }
 
 func (h *packetHandlerMap) Retire(id protocol.ConnectionID) {
-	h.logger.Debugf("Retiring connection ID %s in %s.", id, h.deleteRetiredConnsAfter)
-	time.AfterFunc(h.deleteRetiredConnsAfter, func() {
-		h.mutex.Lock()
-		delete(h.handlers, string(id))
-		h.mutex.Unlock()
-		h.logger.Debugf("Removing connection ID %s after it has been retired.", id)
-	})
+	// h.logger.Debugf("Retiring connection ID %s in %s.", id, h.deleteRetiredSessionsAfter)
+	/*
+		time.AfterFunc(h.deleteRetiredSessionsAfter, func() {
+			// h.logger.Debugf("Removing connection ID %s after it has been retired.", id)
+		})
+	*/
+	/*
+		go func() {
+			h.mutex.Lock()
+			delete(h.handlers, string(id))
+			h.mutex.Unlock()
+		}()
+	*/
+	go h.Remove(id)
 }
 
 func (h *packetHandlerMap) ReplaceWithClosed(id protocol.ConnectionID, handler packetHandler) {
@@ -257,13 +246,14 @@ func (h *packetHandlerMap) ReplaceWithClosed(id protocol.ConnectionID, handler p
 	h.mutex.Unlock()
 	h.logger.Debugf("Replacing connection for connection ID %s with a closed connection.", id)
 
-	time.AfterFunc(h.deleteRetiredConnsAfter, func() {
+	// go h.Remove(id)
+	go func() {
 		h.mutex.Lock()
 		handler.shutdown()
 		delete(h.handlers, string(id))
 		h.mutex.Unlock()
 		h.logger.Debugf("Removing connection ID %s for a closed connection after it has been retired.", id)
-	})
+	}()
 }
 
 func (h *packetHandlerMap) AddResetToken(token protocol.StatelessResetToken, handler packetHandler) {
@@ -365,9 +355,6 @@ func (h *packetHandlerMap) handlePacket(p *receivedPacket) {
 	connID, err := wire.ParseConnectionID(p.data, h.connIDLen)
 	if err != nil {
 		h.logger.Debugf("error parsing connection ID on packet from %s: %s", p.remoteAddr, err)
-		if h.tracer != nil {
-			h.tracer.DroppedPacket(p.remoteAddr, logging.PacketTypeNotDetermined, p.Size(), logging.PacketDropHeaderParseError)
-		}
 		p.buffer.MaybeRelease()
 		return
 	}
