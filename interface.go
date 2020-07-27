@@ -9,7 +9,7 @@ import (
 
 	"github.com/quic-go/quic-go/internal/handshake"
 	"github.com/quic-go/quic-go/internal/protocol"
-	"github.com/quic-go/quic-go/logging"
+	"github.com/sirupsen/logrus"
 )
 
 // The StreamID is the ID of a QUIC stream.
@@ -49,13 +49,6 @@ type TokenStore interface {
 // * Stream.Read and Stream.Write
 // when the server rejects a 0-RTT connection attempt.
 var Err0RTTRejected = errors.New("0-RTT rejected")
-
-// ConnectionTracingKey can be used to associate a ConnectionTracer with a Connection.
-// It is set on the Connection.Context() context,
-// as well as on the context passed to logging.Tracer.NewConnectionTracer.
-var ConnectionTracingKey = connTracingCtxKey{}
-
-type connTracingCtxKey struct{}
 
 // Stream is the interface implemented by QUIC streams
 // In addition to the errors listed on the Connection,
@@ -173,6 +166,8 @@ type Connection interface {
 	// CloseWithError closes the connection with an error.
 	// The error string will be sent to the peer.
 	CloseWithError(ApplicationErrorCode, string) error
+	// CloseNoError closes the connection without an error.
+	CloseNoError()
 	// Context returns a context that is cancelled when the connection is closed.
 	Context() context.Context
 	// ConnectionState returns basic details about the QUIC connection.
@@ -271,6 +266,8 @@ type Config struct {
 	// for tokens that were issued on a previous connection.
 	// If not set, it defaults to 24 hours. Only valid for a server.
 	MaxTokenAge time.Duration
+	// DisableIdleTimeout disables the idle timeout.
+	DisableIdleTimeout bool
 	// The TokenStore stores tokens received from the server.
 	// Tokens are used to skip address validation on future connection attempts.
 	// The key used to store tokens is the ServerName from the tls.Config, if set
@@ -331,7 +328,9 @@ type Config struct {
 	Allow0RTT func(net.Addr) bool
 	// Enable QUIC datagram support (RFC 9221).
 	EnableDatagrams bool
-	Tracer          logging.Tracer
+
+	// Logger is the logger to use.
+	Logger *logrus.Entry
 }
 
 // ConnectionState records basic details about a QUIC connection
