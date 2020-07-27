@@ -1,4 +1,5 @@
 // +build darwin linux freebsd
+// +build !js
 
 package quic
 
@@ -93,22 +94,22 @@ func newConn(c OOBCapablePacketConn) (*oobConn, error) {
 	}
 	switch {
 	case errECNIPv4 == nil && errECNIPv6 == nil:
-		utils.DefaultLogger.Debugf("Activating reading of ECN bits for IPv4 and IPv6.")
+		utils.NewDefaultLogger(nil).Debugf("Activating reading of ECN bits for IPv4 and IPv6.")
 	case errECNIPv4 == nil && errECNIPv6 != nil:
-		utils.DefaultLogger.Debugf("Activating reading of ECN bits for IPv4.")
+		utils.NewDefaultLogger(nil).Debugf("Activating reading of ECN bits for IPv4.")
 	case errECNIPv4 != nil && errECNIPv6 == nil:
-		utils.DefaultLogger.Debugf("Activating reading of ECN bits for IPv6.")
+		utils.NewDefaultLogger(nil).Debugf("Activating reading of ECN bits for IPv6.")
 	case errECNIPv4 != nil && errECNIPv6 != nil:
 		return nil, errors.New("activating ECN failed for both IPv4 and IPv6")
 	}
 	if needsPacketInfo {
 		switch {
 		case errPIIPv4 == nil && errPIIPv6 == nil:
-			utils.DefaultLogger.Debugf("Activating reading of packet info for IPv4 and IPv6.")
+			utils.NewDefaultLogger(nil).Debugf("Activating reading of packet info for IPv4 and IPv6.")
 		case errPIIPv4 == nil && errPIIPv6 != nil:
-			utils.DefaultLogger.Debugf("Activating reading of packet info bits for IPv4.")
+			utils.NewDefaultLogger(nil).Debugf("Activating reading of packet info bits for IPv4.")
 		case errPIIPv4 != nil && errPIIPv6 == nil:
-			utils.DefaultLogger.Debugf("Activating reading of packet info bits for IPv6.")
+			utils.NewDefaultLogger(nil).Debugf("Activating reading of packet info bits for IPv6.")
 		case errPIIPv4 != nil && errPIIPv6 != nil:
 			return nil, errors.New("activating packet info failed for both IPv4 and IPv6")
 		}
