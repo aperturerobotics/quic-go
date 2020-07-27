@@ -117,6 +117,6 @@ func populateConfig(config *Config) *Config {
 		TokenStore:                     config.TokenStore,
 		EnableDatagrams:                config.EnableDatagrams,
 		DisablePathMTUDiscovery:        config.DisablePathMTUDiscovery,
-		Tracer:                         config.Tracer,
+		Logger:                         config.Logger,
 	}
 }

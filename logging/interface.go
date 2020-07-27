@@ -3,9 +3,6 @@
 package logging
 
 import (
-	"net"
-	"time"
-
 	"github.com/lucas-clemente/quic-go/internal/utils"
 
 	"github.com/lucas-clemente/quic-go/internal/protocol"
@@ -88,44 +85,3 @@ const (
 	// StreamTypeBidi is a bidirectional stream
 	StreamTypeBidi = protocol.StreamTypeBidi
 )
-
-// A Tracer traces events.
-type Tracer interface {
-	// ConnectionTracer requests a new tracer for a connection.
-	// The ODCID is the original destination connection ID:
-	// The destination connection ID that the client used on the first Initial packet it sent on this connection.
-	// If nil is returned, tracing will be disabled for this connection.
-	TracerForConnection(p Perspective, odcid ConnectionID) ConnectionTracer
-
-	SentPacket(net.Addr, *Header, ByteCount, []Frame)
-	DroppedPacket(net.Addr, PacketType, ByteCount, PacketDropReason)
-}
-
-// A ConnectionTracer records events.
-type ConnectionTracer interface {
-	StartedConnection(local, remote net.Addr, version VersionNumber, srcConnID, destConnID ConnectionID)
-	ClosedConnection(CloseReason)
-	SentTransportParameters(*TransportParameters)
-	ReceivedTransportParameters(*TransportParameters)
-	RestoredTransportParameters(parameters *TransportParameters) // for 0-RTT
-	SentPacket(hdr *ExtendedHeader, size ByteCount, ack *AckFrame, frames []Frame)
-	ReceivedVersionNegotiationPacket(*Header, []VersionNumber)
-	ReceivedRetry(*Header)
-	ReceivedPacket(hdr *ExtendedHeader, size ByteCount, frames []Frame)
-	BufferedPacket(PacketType)
-	DroppedPacket(PacketType, ByteCount, PacketDropReason)
-	UpdatedMetrics(rttStats *RTTStats, cwnd, bytesInFlight ByteCount, packetsInFlight int)
-	LostPacket(EncryptionLevel, PacketNumber, PacketLossReason)
-	UpdatedCongestionState(CongestionState)
-	UpdatedPTOCount(value uint32)
-	UpdatedKeyFromTLS(EncryptionLevel, Perspective)
-	UpdatedKey(generation KeyPhase, remote bool)
-	DroppedEncryptionLevel(EncryptionLevel)
-	DroppedKey(generation KeyPhase)
-	SetLossTimer(TimerType, EncryptionLevel, time.Time)
-	LossTimerExpired(TimerType, EncryptionLevel)
-	LossTimerCanceled()
-	// Close is called when the connection is closed.
-	Close()
-	Debug(name, msg string)
-}

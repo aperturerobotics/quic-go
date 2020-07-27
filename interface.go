@@ -7,9 +7,10 @@ import (
 	"net"
 	"time"
 
+	"github.com/sirupsen/logrus"
+
 	"github.com/lucas-clemente/quic-go/internal/handshake"
 	"github.com/lucas-clemente/quic-go/internal/protocol"
-	"github.com/lucas-clemente/quic-go/logging"
 )
 
 // RetireBugBackwardsCompatibilityMode controls a backwards compatibility mode, necessary due to a bug in
@@ -292,7 +293,8 @@ type Config struct {
 	// See https://datatracker.ietf.org/doc/draft-ietf-quic-datagram/.
 	// Datagrams will only be available when both peers enable datagram support.
 	EnableDatagrams bool
-	Tracer          logging.Tracer
+	// Logger is the logger to use.
+	Logger *logrus.Entry
 }
 
 // ConnectionState records basic details about a QUIC connection
