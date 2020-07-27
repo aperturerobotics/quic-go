@@ -13,7 +13,6 @@ import (
 
 	"github.com/quic-go/quic-go/internal/protocol"
 	"github.com/quic-go/quic-go/internal/utils"
-	"github.com/quic-go/quic-go/logging"
 )
 
 // The Transport is the central point to manage incoming and outgoing QUIC connections.
@@ -56,9 +55,6 @@ type Transport struct {
 	// allow the peer to quickly recover from crashes and reboots of this node.
 	// See section 10.3 of RFC 9000 for details.
 	StatelessResetKey *StatelessResetKey
-
-	// A Tracer traces events that don't belong to a single QUIC connection.
-	Tracer logging.Tracer
 
 	handlerMap packetHandlerManager
 
@@ -109,7 +105,7 @@ func (t *Transport) Listen(tlsConf *tls.Config, conf *Config) (*Listener, error)
 	if err := t.init(false); err != nil {
 		return nil, err
 	}
-	s, err := newServer(t.conn, t.handlerMap, t.connIDGenerator, tlsConf, conf, t.Tracer, t.closeServer, false)
+	s, err := newServer(t.conn, t.handlerMap, t.connIDGenerator, tlsConf, conf, t.closeServer, false)
 	if err != nil {
 		return nil, err
 	}
@@ -138,7 +134,7 @@ func (t *Transport) ListenEarly(tlsConf *tls.Config, conf *Config) (*EarlyListen
 	if err := t.init(false); err != nil {
 		return nil, err
 	}
-	s, err := newServer(t.conn, t.handlerMap, t.connIDGenerator, tlsConf, conf, t.Tracer, t.closeServer, true)
+	s, err := newServer(t.conn, t.handlerMap, t.connIDGenerator, tlsConf, conf, t.closeServer, true)
 	if err != nil {
 		return nil, err
 	}
@@ -217,7 +213,6 @@ func (t *Transport) init(allowZeroLengthConnIDs bool) error {
 			t.connIDGenerator = &protocol.DefaultConnectionIDGenerator{ConnLen: t.connIDLen}
 		}
 
-		getMultiplexer().AddConn(t.Conn)
 		go t.listen(conn)
 		go t.runSendQueue()
 	})
@@ -311,7 +306,6 @@ var setBufferWarningOnce sync.Once
 
 func (t *Transport) listen(conn rawConn) {
 	defer close(t.listening)
-	defer getMultiplexer().RemoveConn(t.Conn)
 
 	for {
 		p, err := conn.ReadPacket()
@@ -345,9 +339,6 @@ func (t *Transport) handlePacket(p receivedPacket) {
 	connID, err := wire.ParseConnectionID(p.data, t.connIDLen)
 	if err != nil {
 		t.logger.Debugf("error parsing connection ID on packet from %s: %s", p.remoteAddr, err)
-		if t.Tracer != nil {
-			t.Tracer.DroppedPacket(p.remoteAddr, logging.PacketTypeNotDetermined, p.Size(), logging.PacketDropHeaderParseError)
-		}
 		p.buffer.MaybeRelease()
 		return
 	}

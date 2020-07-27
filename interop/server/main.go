@@ -40,7 +40,6 @@ func main() {
 	quicConf := &quic.Config{
 		RequireAddressValidation: func(net.Addr) bool { return testcase == "retry" },
 		Allow0RTT:                testcase == "zerortt",
-		Tracer:                   utils.NewQLOGConnectionTracer,
 	}
 	cert, err := tls.LoadX509KeyPair("/certs/cert.pem", "/certs/priv.key")
 	if err != nil {

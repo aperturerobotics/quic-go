@@ -8,7 +8,6 @@ import (
 
 	"github.com/quic-go/quic-go/internal/protocol"
 	"github.com/quic-go/quic-go/internal/utils"
-	"github.com/quic-go/quic-go/logging"
 )
 
 type client struct {
@@ -34,9 +33,8 @@ type client struct {
 
 	conn quicConn
 
-	tracer    logging.ConnectionTracer
-	tracingID uint64
-	logger    utils.Logger
+	// tracer logging.ConnectionTracer
+	logger utils.Logger
 }
 
 // make it possible to mock connection ID for initial generation in the tests
@@ -149,13 +147,6 @@ func dial(
 	}
 	c.packetHandlers = packetHandlers
 
-	c.tracingID = nextConnTracingID()
-	if c.config.Tracer != nil {
-		c.tracer = c.config.Tracer(context.WithValue(ctx, ConnectionTracingKey, c.tracingID), protocol.PerspectiveClient, c.destConnID)
-	}
-	if c.tracer != nil {
-		c.tracer.StartedConnection(c.sendConn.LocalAddr(), c.sendConn.RemoteAddr(), c.srcConnID, c.destConnID)
-	}
 	if err := c.dial(ctx); err != nil {
 		return nil, err
 	}
@@ -188,7 +179,7 @@ func newClient(sendConn sendConn, connIDGenerator ConnectionIDGenerator, config 
 		config:          config,
 		version:         config.Versions[0],
 		handshakeChan:   make(chan struct{}),
-		logger:          utils.DefaultLogger.WithPrefix("client"),
+		logger:          utils.NewDefaultLogger(config.Logger),
 	}
 	return c, nil
 }
@@ -207,8 +198,6 @@ func (c *client) dial(ctx context.Context) error {
 		c.initialPacketNumber,
 		c.use0RTT,
 		c.hasNegotiatedVersion,
-		c.tracer,
-		c.tracingID,
 		c.logger,
 		c.version,
 	)

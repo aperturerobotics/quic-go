@@ -59,8 +59,6 @@ type packetHandlerMap struct {
 
 	enqueueClosePacket func(closePacket)
 
-	deleteRetiredConnsAfter time.Duration
-
 	statelessResetMutex  sync.Mutex
 	statelessResetHasher hash.Hash
 
@@ -71,12 +69,11 @@ var _ packetHandlerManager = &packetHandlerMap{}
 
 func newPacketHandlerMap(key *StatelessResetKey, enqueueClosePacket func(closePacket), logger utils.Logger) *packetHandlerMap {
 	h := &packetHandlerMap{
-		closeChan:               make(chan struct{}),
-		handlers:                make(map[protocol.ConnectionID]packetHandler),
-		resetTokens:             make(map[protocol.StatelessResetToken]packetHandler),
-		deleteRetiredConnsAfter: protocol.RetiredConnectionIDDeleteTimeout,
-		enqueueClosePacket:      enqueueClosePacket,
-		logger:                  logger,
+		closeChan:          make(chan struct{}),
+		handlers:           make(map[protocol.ConnectionID]packetHandler),
+		resetTokens:        make(map[protocol.StatelessResetToken]packetHandler),
+		enqueueClosePacket: enqueueClosePacket,
+		logger:             logger,
 	}
 	if key != nil {
 		h.statelessResetHasher = hmac.New(sha256.New, key[:])
@@ -160,13 +157,11 @@ func (h *packetHandlerMap) Remove(id protocol.ConnectionID) {
 }
 
 func (h *packetHandlerMap) Retire(id protocol.ConnectionID) {
-	h.logger.Debugf("Retiring connection ID %s in %s.", id, h.deleteRetiredConnsAfter)
-	time.AfterFunc(h.deleteRetiredConnsAfter, func() {
+	go func() {
 		h.mutex.Lock()
 		delete(h.handlers, id)
 		h.mutex.Unlock()
-		h.logger.Debugf("Removing connection ID %s after it has been retired.", id)
-	})
+	}()
 }
 
 // ReplaceWithClosed is called when a connection is closed.
@@ -194,7 +189,8 @@ func (h *packetHandlerMap) ReplaceWithClosed(ids []protocol.ConnectionID, pers p
 	h.mutex.Unlock()
 	h.logger.Debugf("Replacing connection for connection IDs %s with a closed connection.", ids)
 
-	time.AfterFunc(h.deleteRetiredConnsAfter, func() {
+	// go h.Remove(id)
+	go func() {
 		h.mutex.Lock()
 		handler.shutdown()
 		for _, id := range ids {
@@ -202,7 +198,7 @@ func (h *packetHandlerMap) ReplaceWithClosed(ids []protocol.ConnectionID, pers p
 		}
 		h.mutex.Unlock()
 		h.logger.Debugf("Removing connection IDs %s for a closed connection after it has been retired.", ids)
-	})
+	}()
 }
 
 func (h *packetHandlerMap) AddResetToken(token protocol.StatelessResetToken, handler packetHandler) {

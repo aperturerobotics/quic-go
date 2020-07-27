@@ -16,7 +16,6 @@ import (
 	"github.com/quic-go/quic-go/internal/qtls"
 	"github.com/quic-go/quic-go/internal/utils"
 	"github.com/quic-go/quic-go/internal/wire"
-	"github.com/quic-go/quic-go/logging"
 	"github.com/quic-go/quic-go/quicvarint"
 )
 
@@ -42,7 +41,6 @@ type cryptoSetup struct {
 
 	rttStats *utils.RTTStats
 
-	tracer logging.ConnectionTracer
 	logger utils.Logger
 
 	perspective protocol.Perspective
@@ -76,7 +74,6 @@ func NewCryptoSetupClient(
 	tlsConf *tls.Config,
 	enable0RTT bool,
 	rttStats *utils.RTTStats,
-	tracer logging.ConnectionTracer,
 	logger utils.Logger,
 	version protocol.VersionNumber,
 ) CryptoSetup {
@@ -84,7 +81,6 @@ func NewCryptoSetupClient(
 		connID,
 		tp,
 		rttStats,
-		tracer,
 		logger,
 		protocol.PerspectiveClient,
 		version,
@@ -110,7 +106,6 @@ func NewCryptoSetupServer(
 	tlsConf *tls.Config,
 	allow0RTT bool,
 	rttStats *utils.RTTStats,
-	tracer logging.ConnectionTracer,
 	logger utils.Logger,
 	version protocol.VersionNumber,
 ) CryptoSetup {
@@ -118,7 +113,6 @@ func NewCryptoSetupServer(
 		connID,
 		tp,
 		rttStats,
-		tracer,
 		logger,
 		protocol.PerspectiveServer,
 		version,
@@ -164,24 +158,18 @@ func newCryptoSetup(
 	connID protocol.ConnectionID,
 	tp *wire.TransportParameters,
 	rttStats *utils.RTTStats,
-	tracer logging.ConnectionTracer,
 	logger utils.Logger,
 	perspective protocol.Perspective,
 	version protocol.VersionNumber,
 ) *cryptoSetup {
 	initialSealer, initialOpener := NewInitialAEAD(connID, perspective, version)
-	if tracer != nil {
-		tracer.UpdatedKeyFromTLS(protocol.EncryptionInitial, protocol.PerspectiveClient)
-		tracer.UpdatedKeyFromTLS(protocol.EncryptionInitial, protocol.PerspectiveServer)
-	}
 	return &cryptoSetup{
 		initialSealer: initialSealer,
 		initialOpener: initialOpener,
-		aead:          newUpdatableAEAD(rttStats, tracer, logger, version),
+		aead:          newUpdatableAEAD(rttStats, logger, version),
 		events:        make([]Event, 0, 16),
 		ourParams:     tp,
 		rttStats:      rttStats,
-		tracer:        tracer,
 		logger:        logger,
 		perspective:   perspective,
 		version:       version,
@@ -192,10 +180,6 @@ func (h *cryptoSetup) ChangeConnectionID(id protocol.ConnectionID) {
 	initialSealer, initialOpener := NewInitialAEAD(id, h.perspective, h.version)
 	h.initialSealer = initialSealer
 	h.initialOpener = initialOpener
-	if h.tracer != nil {
-		h.tracer.UpdatedKeyFromTLS(protocol.EncryptionInitial, protocol.PerspectiveClient)
-		h.tracer.UpdatedKeyFromTLS(protocol.EncryptionInitial, protocol.PerspectiveServer)
-	}
 }
 
 func (h *cryptoSetup) SetLargest1RTTAcked(pn protocol.PacketNumber) error {
@@ -359,18 +343,23 @@ func (h *cryptoSetup) GetSessionTicket() ([]byte, error) {
 	if h.tlsConf.SessionTicketsDisabled {
 		return nil, nil
 	}
-	if err := h.conn.SendSessionTicket(h.allow0RTT); err != nil {
-		return nil, err
-	}
-	ev := h.conn.NextEvent()
-	if ev.Kind != qtls.QUICWriteData || ev.Level != qtls.QUICEncryptionLevelApplication {
-		panic("crypto/tls bug: where's my session ticket?")
-	}
-	ticket := ev.Data
-	if ev := h.conn.NextEvent(); ev.Kind != qtls.QUICNoEvent {
-		panic("crypto/tls bug: why more than one ticket?")
-	}
-	return ticket, nil
+	// TODO: CJS: Go1.21 changed the type signature of this.
+	// Disable session tickets in this branch for now.
+	return nil, nil
+	/*
+		if err := h.conn.SendSessionTicket(h.allow0RTT); err != nil {
+			return nil, err
+		}
+		ev := h.conn.NextEvent()
+		if ev.Kind != qtls.QUICWriteData || ev.Level != qtls.QUICEncryptionLevelApplication {
+			panic("crypto/tls bug: where's my session ticket?")
+		}
+		ticket := ev.Data
+		if ev := h.conn.NextEvent(); ev.Kind != qtls.QUICNoEvent {
+			panic("crypto/tls bug: why more than one ticket?")
+		}
+		return ticket, nil
+	*/
 }
 
 // accept0RTT is called for the server when receiving the client's session ticket.
@@ -445,9 +434,6 @@ func (h *cryptoSetup) SetReadKey(el qtls.QUICEncryptionLevel, suiteID uint16, tr
 	}
 	h.mutex.Unlock()
 	h.events = append(h.events, Event{Kind: EventReceivedReadKeys})
-	if h.tracer != nil {
-		h.tracer.UpdatedKeyFromTLS(qtls.FromTLSEncryptionLevel(el), h.perspective.Opposite())
-	}
 }
 
 func (h *cryptoSetup) SetWriteKey(el qtls.QUICEncryptionLevel, suiteID uint16, trafficSecret []byte) {
@@ -466,9 +452,6 @@ func (h *cryptoSetup) SetWriteKey(el qtls.QUICEncryptionLevel, suiteID uint16, t
 		h.mutex.Unlock()
 		if h.logger.Debug() {
 			h.logger.Debugf("Installed 0-RTT Write keys (using %s)", tls.CipherSuiteName(suite.ID))
-		}
-		if h.tracer != nil {
-			h.tracer.UpdatedKeyFromTLS(protocol.Encryption0RTT, h.perspective)
 		}
 		// don't set used0RTT here. 0-RTT might still get rejected.
 		return
@@ -491,17 +474,11 @@ func (h *cryptoSetup) SetWriteKey(el qtls.QUICEncryptionLevel, suiteID uint16, t
 			h.used0RTT.Store(true)
 			h.zeroRTTSealer = nil
 			h.logger.Debugf("Dropping 0-RTT keys.")
-			if h.tracer != nil {
-				h.tracer.DroppedEncryptionLevel(protocol.Encryption0RTT)
-			}
 		}
 	default:
 		panic("unexpected write encryption level")
 	}
 	h.mutex.Unlock()
-	if h.tracer != nil {
-		h.tracer.UpdatedKeyFromTLS(qtls.FromTLSEncryptionLevel(el), h.perspective)
-	}
 }
 
 // WriteRecord is called when TLS writes data
@@ -639,9 +616,6 @@ func (h *cryptoSetup) Get1RTTOpener() (ShortHeaderOpener, error) {
 	if h.zeroRTTOpener != nil && time.Since(h.handshakeCompleteTime) > 3*h.rttStats.PTO(true) {
 		h.zeroRTTOpener = nil
 		h.logger.Debugf("Dropping 0-RTT keys.")
-		if h.tracer != nil {
-			h.tracer.DroppedEncryptionLevel(protocol.Encryption0RTT)
-		}
 	}
 
 	if !h.has1RTTOpener {

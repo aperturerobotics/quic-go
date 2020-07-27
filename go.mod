@@ -9,6 +9,7 @@ require (
 	github.com/onsi/gomega v1.27.6
 	github.com/quic-go/qpack v0.4.0
 	github.com/quic-go/qtls-go1-20 v0.3.1
+	github.com/sirupsen/logrus v1.9.3
 	golang.org/x/crypto v0.4.0
 	golang.org/x/exp v0.0.0-20221205204356-47842c84f3db
 	golang.org/x/net v0.10.0
