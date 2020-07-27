@@ -10,7 +10,6 @@ import (
 
 	"github.com/lucas-clemente/quic-go/internal/protocol"
 	"github.com/lucas-clemente/quic-go/internal/utils"
-	"github.com/lucas-clemente/quic-go/logging"
 )
 
 type client struct {
@@ -37,9 +36,8 @@ type client struct {
 
 	session quicSession
 
-	tracer    logging.ConnectionTracer
-	tracingID uint64
-	logger    utils.Logger
+	// tracer logging.ConnectionTracer
+	logger utils.Logger
 }
 
 var (
@@ -84,7 +82,9 @@ func DialAddrEarlyContext(
 	if err != nil {
 		return nil, err
 	}
-	utils.Logger.WithPrefix(utils.DefaultLogger, "client").Debugf("Returning early session")
+	utils.Logger.
+		WithPrefix(utils.NewDefaultLogger(config.Logger), "client").
+		Debugf("Returning early session")
 	return sess, nil
 }
 
@@ -193,7 +193,12 @@ func dialContext(
 		return nil, err
 	}
 	config = populateClientConfig(config, createdPacketConn)
-	packetHandlers, err := getMultiplexer().AddConn(pconn, config.ConnectionIDLength, config.StatelessResetKey, config.Tracer)
+	packetHandlers, err := getMultiplexer().AddConn(
+		pconn,
+		config.ConnectionIDLength,
+		config.StatelessResetKey,
+		utils.NewDefaultLogger(config.Logger),
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -203,17 +208,6 @@ func dialContext(
 	}
 	c.packetHandlers = packetHandlers
 
-	c.tracingID = nextSessionTracingID()
-	if c.config.Tracer != nil {
-		c.tracer = c.config.Tracer.TracerForConnection(
-			context.WithValue(ctx, SessionTracingKey, c.tracingID),
-			protocol.PerspectiveClient,
-			c.destConnID,
-		)
-	}
-	if c.tracer != nil {
-		c.tracer.StartedConnection(c.conn.LocalAddr(), c.conn.RemoteAddr(), c.srcConnID, c.destConnID)
-	}
 	if err := c.dial(ctx); err != nil {
 		return nil, err
 	}
@@ -272,7 +266,7 @@ func newClient(
 		config:            config,
 		version:           config.Versions[0],
 		handshakeChan:     make(chan struct{}),
-		logger:            utils.DefaultLogger.WithPrefix("client"),
+		logger:            utils.NewDefaultLogger(config.Logger),
 	}
 	return c, nil
 }
@@ -290,8 +284,6 @@ func (c *client) dial(ctx context.Context) error {
 		c.initialPacketNumber,
 		c.use0RTT,
 		c.hasNegotiatedVersion,
-		c.tracer,
-		c.tracingID,
 		c.logger,
 		c.version,
 	)
