@@ -7,9 +7,10 @@ import (
 	"net"
 	"time"
 
+	"github.com/sirupsen/logrus"
+
 	"github.com/lucas-clemente/quic-go/internal/handshake"
 	"github.com/lucas-clemente/quic-go/internal/protocol"
-	"github.com/lucas-clemente/quic-go/logging"
 )
 
 // The StreamID is the ID of a QUIC stream.
@@ -58,13 +59,6 @@ type TokenStore interface {
 // * Stream.Read and Stream.Write
 // when the server rejects a 0-RTT connection attempt.
 var Err0RTTRejected = errors.New("0-RTT rejected")
-
-// SessionTracingKey can be used to associate a ConnectionTracer with a Session.
-// It is set on the Session.Context() context,
-// as well as on the context passed to logging.Tracer.NewConnectionTracer.
-var SessionTracingKey = sessionTracingCtxKey{}
-
-type sessionTracingCtxKey struct{}
 
 // Stream is the interface implemented by QUIC streams
 // In addition to the errors listed on the Session,
@@ -291,7 +285,8 @@ type Config struct {
 	// See https://datatracker.ietf.org/doc/draft-ietf-quic-datagram/.
 	// Datagrams will only be available when both peers enable datagram support.
 	EnableDatagrams bool
-	Tracer          logging.Tracer
+	// Logger is the logger to use.
+	Logger *logrus.Entry
 }
 
 // ConnectionState records basic details about a QUIC connection

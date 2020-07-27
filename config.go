@@ -118,6 +118,6 @@ func populateConfig(config *Config) *Config {
 		EnableDatagrams:                  config.EnableDatagrams,
 		DisablePathMTUDiscovery:          config.DisablePathMTUDiscovery,
 		DisableVersionNegotiationPackets: config.DisableVersionNegotiationPackets,
-		Tracer:                           config.Tracer,
+		Logger:                           config.Logger,
 	}
 }
