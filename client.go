@@ -77,7 +77,9 @@ func DialAddrEarly(
 	if err != nil {
 		return nil, err
 	}
-	utils.Logger.WithPrefix(utils.DefaultLogger, "client").Debugf("Returning early session")
+	utils.Logger.
+		WithPrefix(utils.NewDefaultLogger(config.Logger), "client").
+		Debugf("Returning early session")
 	return sess, nil
 }
 
@@ -167,7 +169,12 @@ func dialContext(
 		return nil, errors.New("quic: tls.Config not set")
 	}
 	config = populateClientConfig(config, createdPacketConn)
-	packetHandlers, err := getMultiplexer().AddConn(pconn, config.ConnectionIDLength, config.StatelessResetKey)
+	packetHandlers, err := getMultiplexer().AddConn(
+		pconn,
+		config.ConnectionIDLength,
+		config.StatelessResetKey,
+		utils.NewDefaultLogger(config.Logger),
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -238,7 +245,7 @@ func newClient(
 		config:            config,
 		version:           config.Versions[0],
 		handshakeChan:     make(chan struct{}),
-		logger:            utils.DefaultLogger.WithPrefix("client"),
+		logger:            utils.NewDefaultLogger(config.Logger),
 	}
 	return c, nil
 }

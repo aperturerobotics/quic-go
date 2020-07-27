@@ -178,7 +178,7 @@ func listen(conn net.PacketConn, tlsConf *tls.Config, config *Config, acceptEarl
 		}
 	}
 
-	sessionHandler, err := getMultiplexer().AddConn(conn, config.ConnectionIDLength, config.StatelessResetKey)
+	sessionHandler, err := getMultiplexer().AddConn(conn, config.ConnectionIDLength, config.StatelessResetKey, utils.NewDefaultLogger(config.Logger))
 	if err != nil {
 		return nil, err
 	}
@@ -198,7 +198,7 @@ func listen(conn net.PacketConn, tlsConf *tls.Config, config *Config, acceptEarl
 		running:             make(chan struct{}),
 		receivedPackets:     make(chan *receivedPacket, protocol.MaxServerUnprocessedPackets),
 		newSession:          newSession,
-		logger:              utils.DefaultLogger.WithPrefix("server"),
+		logger:              utils.NewDefaultLogger(config.Logger).WithPrefix("server"),
 		acceptEarlySessions: acceptEarly,
 	}
 	go s.run()
