@@ -199,14 +199,17 @@ type connection struct {
 	versionNegotiated   bool
 	receivedFirstPacket bool
 
-	idleTimeout  time.Duration
-	creationTime time.Time
+	idleTimeout        time.Duration
+	disableIdleTimeout bool
+	creationTime       time.Time
+
 	// The idle timeout is set based on the max of the time we received the last packet...
 	lastPacketReceivedTime time.Time
 	// ... and the time we sent a new ack-eliciting packet after receiving a packet.
 	firstAckElicitingPacketAfterIdleSentTime time.Time
 	// pacingDeadline is the time when the next packet should be sent
 	pacingDeadline time.Time
+	// pacingImmediate bool
 
 	peerParams *wire.TransportParameters
 
@@ -219,7 +222,6 @@ type connection struct {
 	datagramQueue *datagramQueue
 
 	logID  string
-	tracer logging.ConnectionTracer
 	logger utils.Logger
 }
 
@@ -243,8 +245,6 @@ var newConnection = func(
 	tokenGenerator *handshake.TokenGenerator,
 	enable0RTT bool,
 	clientAddressValidated bool,
-	tracer logging.ConnectionTracer,
-	tracingID uint64,
 	logger utils.Logger,
 	v protocol.VersionNumber,
 ) quicConn {
@@ -257,7 +257,6 @@ var newConnection = func(
 		oneRTTStream:          newCryptoStream(),
 		perspective:           protocol.PerspectiveServer,
 		handshakeCompleteChan: make(chan struct{}),
-		tracer:                tracer,
 		logger:                logger,
 		version:               v,
 	}
@@ -285,14 +284,13 @@ var newConnection = func(
 		s.version,
 	)
 	s.preSetup()
-	s.ctx, s.ctxCancel = context.WithCancel(context.WithValue(context.Background(), ConnectionTracingKey, tracingID))
+	s.ctx, s.ctxCancel = context.WithCancel(context.Background())
 	s.sentPacketHandler, s.receivedPacketHandler = ackhandler.NewAckHandler(
 		0,
 		getMaxPacketSize(s.conn.RemoteAddr()),
 		s.rttStats,
 		clientAddressValidated,
 		s.perspective,
-		s.tracer,
 		s.logger,
 		s.version,
 	)
@@ -320,9 +318,6 @@ var newConnection = func(
 	} else {
 		params.MaxDatagramFrameSize = protocol.InvalidByteCount
 	}
-	if s.tracer != nil {
-		s.tracer.SentTransportParameters(params)
-	}
 	cs := handshake.NewCryptoSetupServer(
 		initialStream,
 		handshakeStream,
@@ -342,7 +337,6 @@ var newConnection = func(
 		tlsConf,
 		enable0RTT,
 		s.rttStats,
-		tracer,
 		logger,
 		s.version,
 	)
@@ -378,8 +372,6 @@ var newClientConnection = func(
 	initialPacketNumber protocol.PacketNumber,
 	enable0RTT bool,
 	hasNegotiatedVersion bool,
-	tracer logging.ConnectionTracer,
-	tracingID uint64,
 	logger utils.Logger,
 	v protocol.VersionNumber,
 ) quicConn {
@@ -393,7 +385,6 @@ var newClientConnection = func(
 		handshakeCompleteChan: make(chan struct{}),
 		logID:                 destConnID.String(),
 		logger:                logger,
-		tracer:                tracer,
 		versionNegotiated:     hasNegotiatedVersion,
 		version:               v,
 	}
@@ -416,14 +407,13 @@ var newClientConnection = func(
 		s.version,
 	)
 	s.preSetup()
-	s.ctx, s.ctxCancel = context.WithCancel(context.WithValue(context.Background(), ConnectionTracingKey, tracingID))
+	s.ctx, s.ctxCancel = context.WithCancel(context.Background())
 	s.sentPacketHandler, s.receivedPacketHandler = ackhandler.NewAckHandler(
 		initialPacketNumber,
 		getMaxPacketSize(s.conn.RemoteAddr()),
 		s.rttStats,
 		false, /* has no effect */
 		s.perspective,
-		s.tracer,
 		s.logger,
 		s.version,
 	)
@@ -448,9 +438,6 @@ var newClientConnection = func(
 	} else {
 		params.MaxDatagramFrameSize = protocol.InvalidByteCount
 	}
-	if s.tracer != nil {
-		s.tracer.SentTransportParameters(params)
-	}
 	cs, clientHelloWritten := handshake.NewCryptoSetupClient(
 		initialStream,
 		handshakeStream,
@@ -467,7 +454,6 @@ var newClientConnection = func(
 		tlsConf,
 		enable0RTT,
 		s.rttStats,
-		tracer,
 		logger,
 		s.version,
 	)
@@ -600,6 +586,7 @@ runLoop:
 			for _, p := range queue {
 				if processed := s.handlePacketImpl(p); processed {
 					processedUndecryptablePacket = true
+					s.logger.Debugf("processed an undecryptable packet")
 				}
 				// Don't set timers and send packets if the packet made us close the connection.
 				select {
@@ -609,6 +596,7 @@ runLoop:
 				}
 			}
 		}
+
 		// If we processed any undecryptable packets, jump to the resetting of the timers directly.
 		if !processedUndecryptablePacket {
 			select {
@@ -674,7 +662,10 @@ runLoop:
 
 		if keepAliveTime := s.nextKeepAliveTime(); !keepAliveTime.IsZero() && !now.Before(keepAliveTime) {
 			// send a PING frame since there is no activity in the connection
+
+			// note: comment this, very verbose?
 			s.logger.Debugf("Sending a keep-alive PING to keep the connection alive.")
+
 			s.framer.QueueControlFrame(&wire.PingFrame{})
 			s.keepAlivePingSent = true
 		} else if !s.handshakeComplete && now.Sub(s.creationTime) >= s.config.handshakeTimeout() {
@@ -683,7 +674,7 @@ runLoop:
 		} else {
 			idleTimeoutStartTime := s.idleTimeoutStartTime()
 			if (!s.handshakeComplete && now.Sub(idleTimeoutStartTime) >= s.config.HandshakeIdleTimeout) ||
-				(s.handshakeComplete && now.Sub(idleTimeoutStartTime) >= s.idleTimeout) {
+				(s.handshakeComplete && !s.disableIdleTimeout && now.Sub(idleTimeoutStartTime) >= s.idleTimeout) {
 				s.destroyImpl(qerr.ErrIdleTimeout)
 				continue
 			}
@@ -708,9 +699,6 @@ runLoop:
 	s.cryptoStreamHandler.Close()
 	<-handshaking
 	s.handleCloseError(&closeErr)
-	if e := (&errCloseForRecreating{}); !errors.As(closeErr.err, &e) && s.tracer != nil {
-		s.tracer.Close()
-	}
 	s.logger.Infof("Connection %s closed.", s.logID)
 	s.sendQueue.Close()
 	s.timer.Stop()
@@ -748,7 +736,20 @@ func (s *connection) nextKeepAliveTime() time.Time {
 	if s.config.KeepAlivePeriod == 0 || s.keepAlivePingSent || !s.firstAckElicitingPacketAfterIdleSentTime.IsZero() {
 		return time.Time{}
 	}
-	return s.lastPacketReceivedTime.Add(s.keepAliveInterval)
+	baseTime := s.lastPacketReceivedTime
+	// deterministic jitter based on the previous rx time
+
+	/*
+		cksum := crc32.ChecksumIEEE([]byte(string(
+			strconv.FormatInt(int64(baseTime.Nanosecond()), 10)),
+		))
+		jitterf := float32(cksum) / float32(math.MaxUint32)
+	*/
+	jitterf := float32(baseTime.Nanosecond()%100) / 100.0
+	// +/- jitterf
+	jitterf -= 0.5
+	jitterf *= float32(time.Second * 3) // jitter 1.5sec either way
+	return baseTime.Add(s.keepAliveInterval).Add(time.Duration(jitterf))
 }
 
 func (s *connection) maybeResetTimer() {
@@ -761,7 +762,7 @@ func (s *connection) maybeResetTimer() {
 	} else {
 		if keepAliveTime := s.nextKeepAliveTime(); !keepAliveTime.IsZero() {
 			deadline = keepAliveTime
-		} else {
+		} else if !s.disableIdleTimeout {
 			deadline = s.idleTimeoutStartTime().Add(s.idleTimeout)
 		}
 	}
@@ -859,16 +860,10 @@ func (s *connection) handlePacketImpl(rp *receivedPacket) bool {
 			var err error
 			destConnID, err = wire.ParseConnectionID(p.data, s.srcConnIDLen)
 			if err != nil {
-				if s.tracer != nil {
-					s.tracer.DroppedPacket(logging.PacketTypeNotDetermined, protocol.ByteCount(len(data)), logging.PacketDropHeaderParseError)
-				}
 				s.logger.Debugf("error parsing packet, couldn't parse connection ID: %s", err)
 				break
 			}
 			if destConnID != lastConnID {
-				if s.tracer != nil {
-					s.tracer.DroppedPacket(logging.PacketTypeNotDetermined, protocol.ByteCount(len(data)), logging.PacketDropUnknownConnectionID)
-				}
 				s.logger.Debugf("coalesced packet has different destination connection ID: %s, expected %s", destConnID, lastConnID)
 				break
 			}
@@ -877,22 +872,12 @@ func (s *connection) handlePacketImpl(rp *receivedPacket) bool {
 		if wire.IsLongHeaderPacket(p.data[0]) {
 			hdr, packetData, rest, err := wire.ParsePacket(p.data, s.srcConnIDLen)
 			if err != nil {
-				if s.tracer != nil {
-					dropReason := logging.PacketDropHeaderParseError
-					if err == wire.ErrUnsupportedVersion {
-						dropReason = logging.PacketDropUnsupportedVersion
-					}
-					s.tracer.DroppedPacket(logging.PacketTypeNotDetermined, protocol.ByteCount(len(data)), dropReason)
-				}
 				s.logger.Debugf("error parsing packet: %s", err)
 				break
 			}
 			lastConnID = hdr.DestConnectionID
 
 			if hdr.Version != s.version {
-				if s.tracer != nil {
-					s.tracer.DroppedPacket(logging.PacketTypeFromHeader(hdr), protocol.ByteCount(len(data)), logging.PacketDropUnexpectedVersion)
-				}
 				s.logger.Debugf("Dropping packet with version %x. Expected %x.", hdr.Version, s.version)
 				break
 			}
@@ -949,27 +934,10 @@ func (s *connection) handleShortHeaderPacket(p *receivedPacket, destConnID proto
 
 	if s.receivedPacketHandler.IsPotentiallyDuplicate(pn, protocol.Encryption1RTT) {
 		s.logger.Debugf("Dropping (potentially) duplicate packet.")
-		if s.tracer != nil {
-			s.tracer.DroppedPacket(logging.PacketType1RTT, p.Size(), logging.PacketDropDuplicate)
-		}
 		return false
 	}
 
 	var log func([]logging.Frame)
-	if s.tracer != nil {
-		log = func(frames []logging.Frame) {
-			s.tracer.ReceivedShortHeaderPacket(
-				&logging.ShortHeader{
-					DestConnectionID: destConnID,
-					PacketNumber:     pn,
-					PacketNumberLen:  pnLen,
-					KeyPhase:         keyPhase,
-				},
-				p.Size(),
-				frames,
-			)
-		}
-	}
 	if err := s.handleUnpackedShortHeaderPacket(destConnID, pn, data, p.ecn, p.rcvTime, log); err != nil {
 		s.closeLocal(err)
 		return false
@@ -994,17 +962,11 @@ func (s *connection) handleLongHeaderPacket(p *receivedPacket, hdr *wire.Header)
 	// The server can change the source connection ID with the first Handshake packet.
 	// After this, all packets with a different source connection have to be ignored.
 	if s.receivedFirstPacket && hdr.Type == protocol.PacketTypeInitial && hdr.SrcConnectionID != s.handshakeDestConnID {
-		if s.tracer != nil {
-			s.tracer.DroppedPacket(logging.PacketTypeInitial, p.Size(), logging.PacketDropUnknownConnectionID)
-		}
 		s.logger.Debugf("Dropping Initial packet (%d bytes) with unexpected source connection ID: %s (expected %s)", p.Size(), hdr.SrcConnectionID, s.handshakeDestConnID)
 		return false
 	}
 	// drop 0-RTT packets, if we are a client
 	if s.perspective == protocol.PerspectiveClient && hdr.Type == protocol.PacketType0RTT {
-		if s.tracer != nil {
-			s.tracer.DroppedPacket(logging.PacketType0RTT, p.Size(), logging.PacketDropKeyUnavailable)
-		}
 		return false
 	}
 
@@ -1021,9 +983,6 @@ func (s *connection) handleLongHeaderPacket(p *receivedPacket, hdr *wire.Header)
 
 	if s.receivedPacketHandler.IsPotentiallyDuplicate(packet.hdr.PacketNumber, packet.encryptionLevel) {
 		s.logger.Debugf("Dropping (potentially) duplicate packet.")
-		if s.tracer != nil {
-			s.tracer.DroppedPacket(logging.PacketTypeFromHeader(hdr), p.Size(), logging.PacketDropDuplicate)
-		}
 		return false
 	}
 
@@ -1037,9 +996,6 @@ func (s *connection) handleLongHeaderPacket(p *receivedPacket, hdr *wire.Header)
 func (s *connection) handleUnpackError(err error, p *receivedPacket, pt logging.PacketType) (wasQueued bool) {
 	switch err {
 	case handshake.ErrKeysDropped:
-		if s.tracer != nil {
-			s.tracer.DroppedPacket(pt, p.Size(), logging.PacketDropKeyUnavailable)
-		}
 		s.logger.Debugf("Dropping %s packet (%d bytes) because we already dropped the keys.", pt, p.Size())
 	case handshake.ErrKeysNotYetAvailable:
 		// Sealer for this encryption level not yet available.
@@ -1053,17 +1009,11 @@ func (s *connection) handleUnpackError(err error, p *receivedPacket, pt logging.
 		})
 	case handshake.ErrDecryptionFailed:
 		// This might be a packet injected by an attacker. Drop it.
-		if s.tracer != nil {
-			s.tracer.DroppedPacket(pt, p.Size(), logging.PacketDropPayloadDecryptError)
-		}
 		s.logger.Debugf("Dropping %s packet (%d bytes) that could not be unpacked. Error: %s", pt, p.Size(), err)
 	default:
 		var headerErr *headerParseError
 		if errors.As(err, &headerErr) {
 			// This might be a packet injected by an attacker. Drop it.
-			if s.tracer != nil {
-				s.tracer.DroppedPacket(pt, p.Size(), logging.PacketDropHeaderParseError)
-			}
 			s.logger.Debugf("Dropping %s packet (%d bytes) for which we couldn't unpack the header. Error: %s", pt, p.Size(), err)
 		} else {
 			// This is an error returned by the AEAD (other than ErrDecryptionFailed).
@@ -1076,24 +1026,15 @@ func (s *connection) handleUnpackError(err error, p *receivedPacket, pt logging.
 
 func (s *connection) handleRetryPacket(hdr *wire.Header, data []byte) bool /* was this a valid Retry */ {
 	if s.perspective == protocol.PerspectiveServer {
-		if s.tracer != nil {
-			s.tracer.DroppedPacket(logging.PacketTypeRetry, protocol.ByteCount(len(data)), logging.PacketDropUnexpectedPacket)
-		}
 		s.logger.Debugf("Ignoring Retry.")
 		return false
 	}
 	if s.receivedFirstPacket {
-		if s.tracer != nil {
-			s.tracer.DroppedPacket(logging.PacketTypeRetry, protocol.ByteCount(len(data)), logging.PacketDropUnexpectedPacket)
-		}
 		s.logger.Debugf("Ignoring Retry, since we already received a packet.")
 		return false
 	}
 	destConnID := s.connIDManager.Get()
 	if hdr.SrcConnectionID == destConnID {
-		if s.tracer != nil {
-			s.tracer.DroppedPacket(logging.PacketTypeRetry, protocol.ByteCount(len(data)), logging.PacketDropUnexpectedPacket)
-		}
 		s.logger.Debugf("Ignoring Retry, since the server didn't change the Source Connection ID.")
 		return false
 	}
@@ -1106,9 +1047,6 @@ func (s *connection) handleRetryPacket(hdr *wire.Header, data []byte) bool /* wa
 
 	tag := handshake.GetRetryIntegrityTag(data[:len(data)-16], destConnID, hdr.Version)
 	if !bytes.Equal(data[len(data)-16:], tag[:]) {
-		if s.tracer != nil {
-			s.tracer.DroppedPacket(logging.PacketTypeRetry, protocol.ByteCount(len(data)), logging.PacketDropPayloadDecryptError)
-		}
 		s.logger.Debugf("Ignoring spoofed Retry. Integrity Tag doesn't match.")
 		return false
 	}
@@ -1117,9 +1055,6 @@ func (s *connection) handleRetryPacket(hdr *wire.Header, data []byte) bool /* wa
 		s.logger.Debugf("<- Received Retry:")
 		(&wire.ExtendedHeader{Header: *hdr}).Log(s.logger)
 		s.logger.Debugf("Switching destination connection ID to: %s", hdr.SrcConnectionID)
-	}
-	if s.tracer != nil {
-		s.tracer.ReceivedRetry(hdr)
 	}
 	newDestConnID := hdr.SrcConnectionID
 	s.receivedRetry = true
@@ -1139,26 +1074,17 @@ func (s *connection) handleRetryPacket(hdr *wire.Header, data []byte) bool /* wa
 func (s *connection) handleVersionNegotiationPacket(p *receivedPacket) {
 	if s.perspective == protocol.PerspectiveServer || // servers never receive version negotiation packets
 		s.receivedFirstPacket || s.versionNegotiated { // ignore delayed / duplicated version negotiation packets
-		if s.tracer != nil {
-			s.tracer.DroppedPacket(logging.PacketTypeVersionNegotiation, p.Size(), logging.PacketDropUnexpectedPacket)
-		}
 		return
 	}
 
-	src, dest, supportedVersions, err := wire.ParseVersionNegotiationPacket(p.data)
+	_, _, supportedVersions, err := wire.ParseVersionNegotiationPacket(p.data)
 	if err != nil {
-		if s.tracer != nil {
-			s.tracer.DroppedPacket(logging.PacketTypeVersionNegotiation, p.Size(), logging.PacketDropHeaderParseError)
-		}
 		s.logger.Debugf("Error parsing Version Negotiation packet: %s", err)
 		return
 	}
 
 	for _, v := range supportedVersions {
 		if v == s.version {
-			if s.tracer != nil {
-				s.tracer.DroppedPacket(logging.PacketTypeVersionNegotiation, p.Size(), logging.PacketDropUnexpectedVersion)
-			}
 			// The Version Negotiation packet contains the version that we offered.
 			// This might be a packet sent by an attacker, or it was corrupted.
 			return
@@ -1166,9 +1092,6 @@ func (s *connection) handleVersionNegotiationPacket(p *receivedPacket) {
 	}
 
 	s.logger.Infof("Received a Version Negotiation packet. Supported Versions: %s", supportedVersions)
-	if s.tracer != nil {
-		s.tracer.ReceivedVersionNegotiationPacket(dest, src, supportedVersions)
-	}
 	newVersion, ok := protocol.ChooseSupportedVersion(s.config.Versions, supportedVersions)
 	if !ok {
 		s.destroyImpl(&VersionNegotiationError{
@@ -1177,9 +1100,6 @@ func (s *connection) handleVersionNegotiationPacket(p *receivedPacket) {
 		})
 		s.logger.Infof("No compatible QUIC version found.")
 		return
-	}
-	if s.tracer != nil {
-		s.tracer.NegotiatedVersion(newVersion, s.config.Versions, supportedVersions)
 	}
 
 	s.logger.Infof("Switching to QUIC version %s.", newVersion)
@@ -1198,16 +1118,6 @@ func (s *connection) handleUnpackedPacket(
 ) error {
 	if !s.receivedFirstPacket {
 		s.receivedFirstPacket = true
-		if !s.versionNegotiated && s.tracer != nil {
-			var clientVersions, serverVersions []protocol.VersionNumber
-			switch s.perspective {
-			case protocol.PerspectiveClient:
-				clientVersions = s.config.Versions
-			case protocol.PerspectiveServer:
-				serverVersions = s.config.Versions
-			}
-			s.tracer.NegotiatedVersion(s.version, clientVersions, serverVersions)
-		}
 		// The server can change the source connection ID with the first Handshake packet.
 		if s.perspective == protocol.PerspectiveClient && packet.hdr.IsLongHeader && packet.hdr.SrcConnectionID != s.handshakeDestConnID {
 			cid := packet.hdr.SrcConnectionID
@@ -1225,14 +1135,6 @@ func (s *connection) handleUnpackedPacket(
 				s.handshakeDestConnID = packet.hdr.SrcConnectionID
 				s.connIDManager.ChangeInitialConnID(packet.hdr.SrcConnectionID)
 			}
-			if s.tracer != nil {
-				s.tracer.StartedConnection(
-					s.conn.LocalAddr(),
-					s.conn.RemoteAddr(),
-					packet.hdr.SrcConnectionID,
-					packet.hdr.DestConnectionID,
-				)
-			}
 		}
 	}
 
@@ -1241,11 +1143,6 @@ func (s *connection) handleUnpackedPacket(
 	s.keepAlivePingSent = false
 
 	var log func([]logging.Frame)
-	if s.tracer != nil {
-		log = func(frames []logging.Frame) {
-			s.tracer.ReceivedLongHeaderPacket(packet.hdr, packetSize, frames)
-		}
-	}
 	isAckEliciting, err := s.handleFrames(packet.data, packet.hdr.DestConnectionID, packet.encryptionLevel, log)
 	if err != nil {
 		return err
@@ -1374,9 +1271,6 @@ func (s *connection) handlePacket(p *receivedPacket) {
 	select {
 	case s.receivedPackets <- p:
 	default:
-		if s.tracer != nil {
-			s.tracer.DroppedPacket(logging.PacketTypeNotDetermined, p.Size(), logging.PacketDropDOSPrevention)
-		}
 	}
 }
 
@@ -1564,6 +1458,14 @@ func (s *connection) destroyImpl(e error) {
 func (s *connection) closeRemote(e error) {
 	s.closeOnce.Do(func() {
 		s.logger.Errorf("Peer closed connection with error: %s", e)
+		/*
+			ae, aeOk := e.(*qerr.ApplicationError)
+			if !aeOk || ae.ErrorCode != 0 {
+				s.logger.Errorf("Peer closed session with error: %s", e)
+			} else {
+				s.logger.Debugf("Peer closed session normally")
+			}
+		*/
 		s.closeChan <- closeError{err: e, immediate: true, remote: true}
 	})
 }
@@ -1582,6 +1484,11 @@ func (s *connection) CloseWithError(code ApplicationErrorCode, desc string) erro
 	})
 	<-s.ctx.Done()
 	return nil
+}
+
+// CloseNoError closes the session without sending an error.
+func (s *connection) CloseNoError() {
+	s.shutdown()
 }
 
 func (s *connection) handleCloseError(closeErr *closeError) {
@@ -1622,10 +1529,6 @@ func (s *connection) handleCloseError(closeErr *closeError) {
 		s.datagramQueue.CloseWithError(e)
 	}
 
-	if s.tracer != nil && !errors.As(e, &recreateErr) {
-		s.tracer.ClosedConnection(e)
-	}
-
 	// If this is a remote close we're done here
 	if closeErr.remote {
 		s.connIDGenerator.ReplaceWithClosed(s.perspective, nil)
@@ -1642,7 +1545,7 @@ func (s *connection) handleCloseError(closeErr *closeError) {
 		return
 	}
 	connClosePacket, err := s.sendConnectionClose(e)
-	if err != nil {
+	if err != nil && err != io.EOF && err != context.Canceled {
 		s.logger.Debugf("Error sending CONNECTION_CLOSE: %s", err)
 	}
 	s.connIDGenerator.ReplaceWithClosed(s.perspective, connClosePacket)
@@ -1651,9 +1554,6 @@ func (s *connection) handleCloseError(closeErr *closeError) {
 func (s *connection) dropEncryptionLevel(encLevel protocol.EncryptionLevel) {
 	s.sentPacketHandler.DropPackets(encLevel)
 	s.receivedPacketHandler.DropPackets(encLevel)
-	if s.tracer != nil {
-		s.tracer.DroppedEncryptionLevel(encLevel)
-	}
 	if encLevel == protocol.Encryption0RTT {
 		s.streamsMap.ResetFor0RTT()
 		if err := s.connFlowController.Reset(); err != nil {
@@ -1698,9 +1598,6 @@ func (s *connection) handleTransportParameters(params *wire.TransportParameters)
 func (s *connection) checkTransportParameters(params *wire.TransportParameters) error {
 	if s.logger.Debug() {
 		s.logger.Debugf("Processed Transport Parameters: %s", params)
-	}
-	if s.tracer != nil {
-		s.tracer.ReceivedTransportParameters(params)
 	}
 
 	// check the initial_source_connection_id
@@ -1751,6 +1648,7 @@ func (s *connection) applyTransportParameters() {
 
 func (s *connection) sendPackets() error {
 	s.pacingDeadline = time.Time{}
+	// s.pacingImmediate = false
 
 	var sentPacket bool // only used in for packets sent in send mode SendAny
 	for {
@@ -1758,7 +1656,8 @@ func (s *connection) sendPackets() error {
 		if sendMode == ackhandler.SendAny && s.handshakeComplete && !s.sentPacketHandler.HasPacingBudget() {
 			deadline := s.sentPacketHandler.TimeUntilSend()
 			if deadline.IsZero() {
-				deadline = deadlineSendImmediately
+				// deadline = deadlineSendImmediately
+
 			}
 			s.pacingDeadline = deadline
 			// Allow sending of an ACK if we're pacing limit (if we haven't sent out a packet yet).
@@ -1805,10 +1704,13 @@ func (s *connection) sendPackets() error {
 			return fmt.Errorf("BUG: invalid send mode %d", sendMode)
 		}
 		// Prioritize receiving of packets over sending out more packets.
-		if len(s.receivedPackets) > 0 {
-			s.pacingDeadline = deadlineSendImmediately
-			return nil
-		}
+		/*
+			if len(s.receivedPackets) > 0 {
+				// s.pacingDeadline = deadlineSendImmediately
+				s.pacingImmediate = true
+				return nil
+			}
+		*/
 		if s.sendQueue.WouldBlock() {
 			return nil
 		}
@@ -1959,19 +1861,6 @@ func (s *connection) sendConnectionClose(e error) ([]byte, error) {
 }
 
 func (s *connection) logPacketContents(p *packetContents) {
-	// tracing
-	if s.tracer != nil {
-		frames := make([]logging.Frame, 0, len(p.frames))
-		for _, f := range p.frames {
-			frames = append(frames, logutils.ConvertFrame(f.Frame))
-		}
-		var ack *logging.AckFrame
-		if p.ack != nil {
-			ack = logutils.ConvertAckFrame(p.ack)
-		}
-		s.tracer.SentPacket(p.header, p.length, ack, frames)
-	}
-
 	// quic-go logging
 	if !s.logger.Debug() {
 		return
@@ -2067,16 +1956,10 @@ func (s *connection) tryQueueingUndecryptablePacket(p *receivedPacket, pt loggin
 		panic("shouldn't queue undecryptable packets after handshake completion")
 	}
 	if len(s.undecryptablePackets)+1 > protocol.MaxUndecryptablePackets {
-		if s.tracer != nil {
-			s.tracer.DroppedPacket(pt, p.Size(), logging.PacketDropDOSPrevention)
-		}
 		s.logger.Infof("Dropping undecryptable packet (%d bytes). Undecryptable packet queue full.", p.Size())
 		return
 	}
 	s.logger.Infof("Queueing packet (%d bytes) for later decryption", p.Size())
-	if s.tracer != nil {
-		s.tracer.BufferedPacket(pt, p.Size())
-	}
 	s.undecryptablePackets = append(s.undecryptablePackets, p)
 }
 

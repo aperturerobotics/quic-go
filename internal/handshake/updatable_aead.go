@@ -12,7 +12,6 @@ import (
 	"github.com/lucas-clemente/quic-go/internal/qerr"
 	"github.com/lucas-clemente/quic-go/internal/qtls"
 	"github.com/lucas-clemente/quic-go/internal/utils"
-	"github.com/lucas-clemente/quic-go/logging"
 )
 
 // KeyUpdateInterval is the maximum number of packets we send or receive before initiating a key update.
@@ -55,7 +54,6 @@ type updatableAEAD struct {
 
 	rttStats *utils.RTTStats
 
-	tracer  logging.ConnectionTracer
 	logger  utils.Logger
 	version protocol.VersionNumber
 
@@ -68,7 +66,7 @@ var (
 	_ ShortHeaderSealer = &updatableAEAD{}
 )
 
-func newUpdatableAEAD(rttStats *utils.RTTStats, tracer logging.ConnectionTracer, logger utils.Logger, version protocol.VersionNumber) *updatableAEAD {
+func newUpdatableAEAD(rttStats *utils.RTTStats, logger utils.Logger, version protocol.VersionNumber) *updatableAEAD {
 	return &updatableAEAD{
 		firstPacketNumber:       protocol.InvalidPacketNumber,
 		largestAcked:            protocol.InvalidPacketNumber,
@@ -76,7 +74,6 @@ func newUpdatableAEAD(rttStats *utils.RTTStats, tracer logging.ConnectionTracer,
 		firstSentWithCurrentKey: protocol.InvalidPacketNumber,
 		keyUpdateInterval:       KeyUpdateInterval,
 		rttStats:                rttStats,
-		tracer:                  tracer,
 		logger:                  logger,
 		version:                 version,
 	}
@@ -85,9 +82,6 @@ func newUpdatableAEAD(rttStats *utils.RTTStats, tracer logging.ConnectionTracer,
 func (a *updatableAEAD) rollKeys() {
 	if a.prevRcvAEAD != nil {
 		a.logger.Debugf("Dropping key phase %d ahead of scheduled time. Drop time was: %s", a.keyPhase-1, a.prevRcvAEADExpiry)
-		if a.tracer != nil {
-			a.tracer.DroppedKey(a.keyPhase - 1)
-		}
 		a.prevRcvAEADExpiry = time.Time{}
 	}
 
@@ -179,9 +173,6 @@ func (a *updatableAEAD) open(dst, src []byte, rcvTime time.Time, pn protocol.Pac
 		a.prevRcvAEAD = nil
 		a.logger.Debugf("Dropping key phase %d", a.keyPhase-1)
 		a.prevRcvAEADExpiry = time.Time{}
-		if a.tracer != nil {
-			a.tracer.DroppedKey(a.keyPhase - 1)
-		}
 	}
 	binary.BigEndian.PutUint64(a.nonceBuf[len(a.nonceBuf)-8:], uint64(pn))
 	if kp != a.keyPhase.Bit() {
@@ -213,9 +204,6 @@ func (a *updatableAEAD) open(dst, src []byte, rcvTime time.Time, pn protocol.Pac
 		// The peer initiated this key update. It's safe to drop the keys for the previous generation now.
 		// Start a timer to drop the previous key generation.
 		a.startKeyDropTimer(rcvTime)
-		if a.tracer != nil {
-			a.tracer.UpdatedKey(a.keyPhase, true)
-		}
 		a.firstRcvdWithCurrentKey = pn
 		return dec, err
 	}
@@ -299,9 +287,6 @@ func (a *updatableAEAD) KeyPhase() protocol.KeyPhaseBit {
 	if a.shouldInitiateKeyUpdate() {
 		a.rollKeys()
 		a.logger.Debugf("Initiating key update to key phase %d", a.keyPhase)
-		if a.tracer != nil {
-			a.tracer.UpdatedKey(a.keyPhase, false)
-		}
 	}
 	return a.keyPhase.Bit()
 }
