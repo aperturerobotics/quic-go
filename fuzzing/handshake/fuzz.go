@@ -385,8 +385,7 @@ func runHandshake(runConfig [confLen]byte, messageConfig uint8, clientConf *tls.
 		clientConf,
 		enable0RTTClient,
 		utils.NewRTTStats(),
-		nil,
-		utils.DefaultLogger.WithPrefix("client"),
+		utils.NewDefaultLogger(nil).WithPrefix("client"),
 		protocol.VersionTLS,
 	)
 
@@ -402,8 +401,7 @@ func runHandshake(runConfig [confLen]byte, messageConfig uint8, clientConf *tls.
 		serverConf,
 		enable0RTTServer,
 		utils.NewRTTStats(),
-		nil,
-		utils.DefaultLogger.WithPrefix("server"),
+		utils.NewDefaultLogger(nil).WithPrefix("server"),
 		protocol.VersionTLS,
 	)
 
