@@ -256,6 +256,9 @@ type Config struct {
 	StatelessResetKey []byte
 	// KeepAlive defines whether this peer will periodically send a packet to keep the connection alive.
 	KeepAlive bool
+	// KeepAliveMaxInactivityDur is the maximum amt of inactivity before a ping is sent.
+	// Defaults to 10s
+	KeepAliveMaxInactivityDur time.Duration
 	// QUIC Event Tracer.
 	// Warning: Experimental. This API should not be considered stable and will change soon.
 	QuicTracer quictrace.Tracer
