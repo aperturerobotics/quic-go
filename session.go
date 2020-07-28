@@ -6,9 +6,12 @@ import (
 	"crypto/tls"
 	"errors"
 	"fmt"
+	"hash/crc32"
 	"io"
+	"math"
 	"net"
 	"reflect"
+	"strconv"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -635,7 +638,7 @@ runLoop:
 
 		if keepAliveTime := s.nextKeepAliveTime(); !keepAliveTime.IsZero() && !now.Before(keepAliveTime) {
 			// send a PING frame since there is no activity in the session
-			s.logger.Debugf("Sending a keep-alive PING to keep the connection alive.")
+			// s.logger.Debugf("Sending a keep-alive PING to keep the connection alive.")
 			s.framer.QueueControlFrame(&wire.PingFrame{})
 			s.keepAlivePingSent = true
 		} else if !s.handshakeComplete && now.Sub(s.sessionCreationTime) >= s.config.handshakeTimeout() {
@@ -704,7 +707,26 @@ func (s *session) nextKeepAliveTime() time.Time {
 	if !s.config.KeepAlive || s.keepAlivePingSent || !s.firstAckElicitingPacketAfterIdleSentTime.IsZero() {
 		return time.Time{}
 	}
-	return s.lastPacketReceivedTime.Add(s.keepAliveInterval)
+	maxVal := time.Second * 10
+	/*
+		if s.config != nil && s.config.KeepAliveMaxInactivityDur > 0 {
+			maxVal = s.config.KeepAliveMaxInactivityDur
+		}
+	*/
+	timeAfterLastRecv := s.keepAliveInterval / 2
+	if timeAfterLastRecv > maxVal {
+		timeAfterLastRecv = maxVal
+	}
+	baseTime := s.lastPacketReceivedTime
+	// deterministic jitter
+	cksum := crc32.ChecksumIEEE([]byte(string(
+		strconv.FormatInt(int64(baseTime.Nanosecond()), 10)),
+	))
+	jitterf := float32(cksum) / float32(math.MaxUint32)
+	// +/- jitterf
+	jitterf -= 0.5
+	jitterf *= float32(time.Second * 3) // jitter 1.5sec either way
+	return baseTime.Add(timeAfterLastRecv).Add(time.Duration(jitterf))
 }
 
 func (s *session) maybeResetTimer() {

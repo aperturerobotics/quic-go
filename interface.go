@@ -285,6 +285,10 @@ type Config struct {
 	// See https://datatracker.ietf.org/doc/draft-ietf-quic-datagram/.
 	// Datagrams will only be available when both peers enable datagram support.
 	EnableDatagrams bool
+	// KeepAliveMaxInactivityDur is the maximum amt of inactivity before a ping is sent.
+	// Defaults to 10s
+	KeepAliveMaxInactivityDur time.Duration
+
 	// Logger is the logger to use.
 	Logger *logrus.Entry
 }
