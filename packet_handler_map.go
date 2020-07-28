@@ -220,13 +220,20 @@ func (h *packetHandlerMap) Remove(id protocol.ConnectionID) {
 }
 
 func (h *packetHandlerMap) Retire(id protocol.ConnectionID) {
-	h.logger.Debugf("Retiring connection ID %s in %s.", id, h.deleteRetiredSessionsAfter)
-	time.AfterFunc(h.deleteRetiredSessionsAfter, func() {
-		h.mutex.Lock()
-		delete(h.handlers, string(id))
-		h.mutex.Unlock()
-		h.logger.Debugf("Removing connection ID %s after it has been retired.", id)
-	})
+	// h.logger.Debugf("Retiring connection ID %s in %s.", id, h.deleteRetiredSessionsAfter)
+	/*
+		time.AfterFunc(h.deleteRetiredSessionsAfter, func() {
+			// h.logger.Debugf("Removing connection ID %s after it has been retired.", id)
+		})
+	*/
+	/*
+		go func() {
+			h.mutex.Lock()
+			delete(h.handlers, string(id))
+			h.mutex.Unlock()
+		}()
+	*/
+	go h.Remove(id)
 }
 
 func (h *packetHandlerMap) ReplaceWithClosed(id protocol.ConnectionID, handler packetHandler) {
@@ -235,13 +242,18 @@ func (h *packetHandlerMap) ReplaceWithClosed(id protocol.ConnectionID, handler p
 	h.mutex.Unlock()
 	h.logger.Debugf("Replacing session for connection ID %s with a closed session.", id)
 
-	time.AfterFunc(h.deleteRetiredSessionsAfter, func() {
+	// go h.Remove(id)
+	go func() {
 		h.mutex.Lock()
 		handler.shutdown()
 		delete(h.handlers, string(id))
 		h.mutex.Unlock()
-		h.logger.Debugf("Removing connection ID %s for a closed session after it has been retired.", id)
-	})
+		h.logger.Debugf("Removing connection ID %s for a closed session.", id)
+	}()
+	/*
+		time.AfterFunc(h.deleteRetiredSessionsAfter, func() {
+		})
+	*/
 }
 
 func (h *packetHandlerMap) AddResetToken(token protocol.StatelessResetToken, handler packetHandler) {
