@@ -34,7 +34,7 @@ type Logger interface {
 func NewDefaultLogger(le *logrus.Entry) Logger {
 	if le == nil {
 		log := logrus.New()
-		log.SetLevel(logrus.DebugLevel)
+		log.SetLevel(logrus.InfoLevel)
 		le = logrus.NewEntry(log)
 	}
 	return &defaultLogger{Entry: le}
@@ -68,7 +68,13 @@ func (l *defaultLogger) WithPrefix(prefix string) Logger {
 	}
 }
 
+func (l *defaultLogger) Debugf(fmt string, args ...interface{}) {
+	if l.Debug() {
+		l.Entry.Debugf(fmt, args)
+	}
+}
+
 // Debug returns true if the log level is LogLevelDebug
 func (l *defaultLogger) Debug() bool {
-	return l.Entry.Level == logrus.DebugLevel
+	return l.Entry.Level >= logrus.DebugLevel
 }
