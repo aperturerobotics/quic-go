@@ -485,7 +485,7 @@ func (h *sentPacketHandler) setLossDetectionTimer() {
 	// Cancel the alarm if no packets are outstanding
 	if !h.hasOutstandingPackets() && h.peerCompletedAddressValidation {
 		h.alarm = time.Time{}
-		h.logger.Debugf("Canceling loss detection timer. No packets in flight.")
+		// h.logger.Debugf("Canceling loss detection timer. No packets in flight.")
 		if h.tracer != nil && !oldAlarm.IsZero() {
 			h.tracer.LossTimerCanceled()
 		}
