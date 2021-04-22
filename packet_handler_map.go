@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"hash"
-	"log"
 	"net"
 	"sync"
 	"time"
@@ -116,9 +115,6 @@ func setReceiveBuffer(c net.PacketConn, logger utils.Logger) error {
 	return nil
 }
 
-// only print warnings about the UPD receive buffer size once
-var receiveBufferWarningOnce sync.Once
-
 func newPacketHandlerMap(
 	c net.PacketConn,
 	connIDLen int,
@@ -126,9 +122,8 @@ func newPacketHandlerMap(
 	logger utils.Logger,
 ) (packetHandlerManager, error) {
 	if err := setReceiveBuffer(c, logger); err != nil {
-		receiveBufferWarningOnce.Do(func() {
-			log.Printf("%s. See https://github.com/lucas-clemente/quic-go/wiki/UDP-Receive-Buffer-Size for details.", err)
-		})
+		// ignore this error, it doesn't matter for non-UDP conns.
+		_ = err
 	}
 	conn, err := wrapConn(c)
 	if err != nil {
