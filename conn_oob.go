@@ -1,4 +1,5 @@
 // +build darwin linux freebsd
+// +build !js
 
 package quic
 
