@@ -231,6 +231,8 @@ type Config struct {
 	// If the timeout is exceeded, the connection is closed.
 	// If this value is zero, the timeout is set to 30 seconds.
 	MaxIdleTimeout time.Duration
+	// DisableIdleTimeout disables the idle timeout.
+	DisableIdleTimeout bool
 	// AcceptToken determines if a Token is accepted.
 	// It is called with token = nil if the client didn't send a token.
 	// If not set, a default verification function is used:

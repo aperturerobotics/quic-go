@@ -199,6 +199,7 @@ type session struct {
 	receivedFirstPacket bool
 
 	idleTimeout         time.Duration
+	disableIdleTimeout  bool
 	sessionCreationTime time.Time
 	// The idle timeout is set based on the max of the time we received the last packet...
 	lastPacketReceivedTime time.Time
@@ -647,7 +648,7 @@ runLoop:
 		} else {
 			idleTimeoutStartTime := s.idleTimeoutStartTime()
 			if (!s.handshakeComplete && now.Sub(idleTimeoutStartTime) >= s.config.HandshakeIdleTimeout) ||
-				(s.handshakeComplete && now.Sub(idleTimeoutStartTime) >= s.idleTimeout) {
+				(s.handshakeComplete && !s.disableIdleTimeout && now.Sub(idleTimeoutStartTime) >= s.idleTimeout) {
 				s.destroyImpl(qerr.ErrIdleTimeout)
 				continue
 			}
@@ -1495,6 +1496,7 @@ func (s *session) applyTransportParameters() {
 	params := s.peerParams
 	// Our local idle timeout will always be > 0.
 	s.idleTimeout = utils.MinNonZeroDuration(s.config.MaxIdleTimeout, params.MaxIdleTimeout)
+	s.disableIdleTimeout = s.config.DisableIdleTimeout
 	s.keepAliveInterval = utils.MinDuration(s.idleTimeout/2, protocol.MaxKeepAliveInterval)
 	s.streamsMap.UpdateLimits(params)
 	s.packer.HandleTransportParameters(params)
