@@ -99,10 +99,13 @@ var (
 	_ sentPacketTracker = &sentPacketHandler{}
 )
 
+// clientAddressValidated indicates whether the address was validated beforehand by an address validation token.
+// If the address was validated, the amplification limit doesn't apply. It has no effect for a client.
 func newSentPacketHandler(
 	initialPN protocol.PacketNumber,
 	initialMaxDatagramSize protocol.ByteCount,
 	rttStats *utils.RTTStats,
+	clientAddressValidated bool,
 	pers protocol.Perspective,
 	logger utils.Logger,
 ) *sentPacketHandler {
@@ -115,7 +118,7 @@ func newSentPacketHandler(
 
 	return &sentPacketHandler{
 		peerCompletedAddressValidation: pers == protocol.PerspectiveServer,
-		peerAddressValidated:           pers == protocol.PerspectiveClient,
+		peerAddressValidated:           pers == protocol.PerspectiveClient || clientAddressValidated,
 		initialPackets:                 newPacketNumberSpace(initialPN, false, rttStats),
 		handshakePackets:               newPacketNumberSpace(0, false, rttStats),
 		appDataPackets:                 newPacketNumberSpace(0, true, rttStats),

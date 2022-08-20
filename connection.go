@@ -244,6 +244,7 @@ var newConnection = func(
 	tlsConf *tls.Config,
 	tokenGenerator *handshake.TokenGenerator,
 	enable0RTT bool,
+	clientAddressValidated bool,
 	logger utils.Logger,
 	v protocol.VersionNumber,
 ) quicConn {
@@ -287,6 +288,7 @@ var newConnection = func(
 		0,
 		getMaxPacketSize(s.conn.RemoteAddr()),
 		s.rttStats,
+		clientAddressValidated,
 		s.perspective,
 		s.logger,
 		s.version,
@@ -406,6 +408,7 @@ var newClientConnection = func(
 		initialPacketNumber,
 		getMaxPacketSize(s.conn.RemoteAddr()),
 		s.rttStats,
+		false, /* has no effect */
 		s.perspective,
 		s.logger,
 		s.version,
