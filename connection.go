@@ -93,7 +93,7 @@ type connRunner interface {
 	GetStatelessResetToken(protocol.ConnectionID) protocol.StatelessResetToken
 	Retire(protocol.ConnectionID)
 	Remove(protocol.ConnectionID)
-	ReplaceWithClosed([]protocol.ConnectionID, packetHandler)
+	ReplaceWithClosed([]protocol.ConnectionID, protocol.Perspective, []byte)
 	AddResetToken(protocol.StatelessResetToken, packetHandler)
 	RemoveResetToken(protocol.StatelessResetToken)
 }
@@ -1445,7 +1445,7 @@ func (s *connection) handleCloseError(closeErr *closeError) {
 
 	// If this is a remote close we're done here
 	if closeErr.remote {
-		s.connIDGenerator.ReplaceWithClosed(newClosedRemoteConn(s.perspective))
+		s.connIDGenerator.ReplaceWithClosed(s.perspective, nil)
 		return
 	}
 	if closeErr.immediate {
@@ -1462,8 +1462,7 @@ func (s *connection) handleCloseError(closeErr *closeError) {
 	if err != nil && err != io.EOF && err != context.Canceled {
 		s.logger.Debugf("Error sending CONNECTION_CLOSE: %s", err)
 	}
-	cs := newClosedLocalConn(s.conn, connClosePacket, s.perspective, s.logger)
-	s.connIDGenerator.ReplaceWithClosed(cs)
+	s.connIDGenerator.ReplaceWithClosed(s.perspective, connClosePacket)
 }
 
 func (s *connection) dropEncryptionLevel(encLevel protocol.EncryptionLevel) {
