@@ -93,7 +93,7 @@ type connRunner interface {
 	GetStatelessResetToken(protocol.ConnectionID) protocol.StatelessResetToken
 	Retire(protocol.ConnectionID)
 	Remove(protocol.ConnectionID)
-	ReplaceWithClosed(protocol.ConnectionID, packetHandler)
+	ReplaceWithClosed([]protocol.ConnectionID, packetHandler)
 	AddResetToken(protocol.StatelessResetToken, packetHandler)
 	RemoveResetToken(protocol.StatelessResetToken)
 }
