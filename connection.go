@@ -280,6 +280,7 @@ var newConnection = func(
 		runner.Retire,
 		runner.ReplaceWithClosed,
 		s.queueControlFrame,
+		s.config.ConnectionIDGenerator,
 		s.version,
 	)
 	s.preSetup()
@@ -402,6 +403,7 @@ var newClientConnection = func(
 		runner.Retire,
 		runner.ReplaceWithClosed,
 		s.queueControlFrame,
+		s.config.ConnectionIDGenerator,
 		s.version,
 	)
 	s.preSetup()
