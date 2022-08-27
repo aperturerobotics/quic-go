@@ -948,7 +948,7 @@ func (s *connection) handleSinglePacket(p *receivedPacket, hdr *wire.Header) boo
 			// Sealer for this encryption level not yet available.
 			// Try again later.
 			wasQueued = true
-			s.tryQueueingUndecryptablePacket(p, hdr)
+			s.tryQueueingUndecryptablePacket(p, logging.PacketTypeFromHeader(hdr))
 		case wire.ErrInvalidReservedBits:
 			s.closeLocal(&qerr.TransportError{
 				ErrorCode:    qerr.ProtocolViolation,
@@ -1849,7 +1849,9 @@ func (s *connection) scheduleSending() {
 	}
 }
 
-func (s *connection) tryQueueingUndecryptablePacket(p *receivedPacket, hdr *wire.Header) {
+// tryQueueingUndecryptablePacket queues a packet for which we're missing the decryption keys.
+// The logging.PacketType is only used for logging purposes.
+func (s *connection) tryQueueingUndecryptablePacket(p *receivedPacket, pt logging.PacketType) {
 	if s.handshakeComplete {
 		panic("shouldn't queue undecryptable packets after handshake completion")
 	}
