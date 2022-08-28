@@ -1041,8 +1041,7 @@ func (s *connection) handleVersionNegotiationPacket(p *receivedPacket) {
 		return
 	}
 
-	hdr, supportedVersions, err := wire.ParseVersionNegotiationPacket(bytes.NewReader(p.data))
-	_ = hdr
+	_, _, supportedVersions, err := wire.ParseVersionNegotiationPacket(p.data)
 	if err != nil {
 		s.logger.Debugf("Error parsing Version Negotiation packet: %s", err)
 		return
