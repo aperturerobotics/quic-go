@@ -590,13 +590,14 @@ func (s *baseServer) sendError(remoteAddr net.Addr, hdr *wire.Header, sealer han
 	}
 	payloadOffset := buf.Len()
 
-	if err := ccf.Write(buf, hdr.Version); err != nil {
+	raw := buf.Bytes()
+	raw, err := ccf.Write(raw, hdr.Version)
+	if err != nil {
 		return err
 	}
 
-	raw := buf.Bytes()
 	_ = sealer.Seal(raw[payloadOffset:payloadOffset], raw[payloadOffset:], replyHdr.PacketNumber, raw[:payloadOffset])
-	raw = raw[0 : buf.Len()+sealer.Overhead()]
+	raw = raw[0 : len(raw)+sealer.Overhead()]
 
 	pnOffset := payloadOffset - int(replyHdr.PacketNumberLen)
 	sealer.EncryptHeader(
@@ -607,7 +608,7 @@ func (s *baseServer) sendError(remoteAddr net.Addr, hdr *wire.Header, sealer han
 
 	replyHdr.Log(s.logger)
 	wire.LogFrame(s.logger, ccf, true)
-	_, err := s.conn.WritePacket(raw, remoteAddr, info.OOB())
+	_, err = s.conn.WritePacket(raw, remoteAddr, info.OOB())
 	return err
 }
 
