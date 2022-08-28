@@ -889,7 +889,7 @@ func (s *connection) handlePacketImpl(rp *receivedPacket) bool {
 			break
 		}
 
-		if counter > 0 && !hdr.DestConnectionID.Equal(lastConnID) {
+		if counter > 0 && hdr.DestConnectionID != lastConnID {
 			s.logger.Debugf("coalesced packet has different destination connection ID: %s, expected %s", hdr.DestConnectionID, lastConnID)
 			break
 		}
@@ -930,7 +930,7 @@ func (s *connection) handleSinglePacket(p *receivedPacket, hdr *wire.Header) boo
 
 	// The server can change the source connection ID with the first Handshake packet.
 	// After this, all packets with a different source connection have to be ignored.
-	if s.receivedFirstPacket && hdr.IsLongHeader && hdr.Type == protocol.PacketTypeInitial && !hdr.SrcConnectionID.Equal(s.handshakeDestConnID) {
+	if s.receivedFirstPacket && hdr.IsLongHeader && hdr.Type == protocol.PacketTypeInitial && hdr.SrcConnectionID != s.handshakeDestConnID {
 		s.logger.Debugf("Dropping Initial packet (%d bytes) with unexpected source connection ID: %s (expected %s)", p.Size(), hdr.SrcConnectionID, s.handshakeDestConnID)
 		return false
 	}
@@ -998,7 +998,7 @@ func (s *connection) handleRetryPacket(hdr *wire.Header, data []byte) bool /* wa
 		return false
 	}
 	destConnID := s.connIDManager.Get()
-	if hdr.SrcConnectionID.Equal(destConnID) {
+	if hdr.SrcConnectionID == destConnID {
 		s.logger.Debugf("Ignoring Retry, since the server didn't change the Source Connection ID.")
 		return false
 	}
@@ -1090,7 +1090,7 @@ func (s *connection) handleUnpackedPacket(
 	if !s.receivedFirstPacket {
 		s.receivedFirstPacket = true
 		// The server can change the source connection ID with the first Handshake packet.
-		if s.perspective == protocol.PerspectiveClient && packet.hdr.IsLongHeader && !packet.hdr.SrcConnectionID.Equal(s.handshakeDestConnID) {
+		if s.perspective == protocol.PerspectiveClient && packet.hdr.IsLongHeader && packet.hdr.SrcConnectionID != s.handshakeDestConnID {
 			cid := packet.hdr.SrcConnectionID
 			s.logger.Debugf("Received first packet. Switching destination connection ID to: %s", cid)
 			s.handshakeDestConnID = cid
@@ -1102,7 +1102,7 @@ func (s *connection) handleUnpackedPacket(
 		// we might have create a connection with an incorrect source connection ID.
 		// Once we authenticate the first packet, we need to update it.
 		if s.perspective == protocol.PerspectiveServer {
-			if !packet.hdr.SrcConnectionID.Equal(s.handshakeDestConnID) {
+			if packet.hdr.SrcConnectionID != s.handshakeDestConnID {
 				s.handshakeDestConnID = packet.hdr.SrcConnectionID
 				s.connIDManager.ChangeInitialConnID(packet.hdr.SrcConnectionID)
 			}
@@ -1518,7 +1518,7 @@ func (s *connection) checkTransportParameters(params *wire.TransportParameters) 
 	}
 
 	// check the initial_source_connection_id
-	if !params.InitialSourceConnectionID.Equal(s.handshakeDestConnID) {
+	if params.InitialSourceConnectionID != s.handshakeDestConnID {
 		return fmt.Errorf("expected initial_source_connection_id to equal %s, is %s", s.handshakeDestConnID, params.InitialSourceConnectionID)
 	}
 
@@ -1526,14 +1526,14 @@ func (s *connection) checkTransportParameters(params *wire.TransportParameters) 
 		return nil
 	}
 	// check the original_destination_connection_id
-	if !params.OriginalDestinationConnectionID.Equal(s.origDestConnID) {
+	if params.OriginalDestinationConnectionID != s.origDestConnID {
 		return fmt.Errorf("expected original_destination_connection_id to equal %s, is %s", s.origDestConnID, params.OriginalDestinationConnectionID)
 	}
 	if s.retrySrcConnID != nil { // a Retry was performed
 		if params.RetrySourceConnectionID == nil {
 			return errors.New("missing retry_source_connection_id")
 		}
-		if !(*params.RetrySourceConnectionID).Equal(*s.retrySrcConnID) {
+		if *params.RetrySourceConnectionID != *s.retrySrcConnID {
 			return fmt.Errorf("expected retry_source_connection_id to equal %s, is %s", s.retrySrcConnID, *params.RetrySourceConnectionID)
 		}
 	} else if params.RetrySourceConnectionID != nil {
