@@ -310,8 +310,7 @@ type Config struct {
 	// This can be useful if version information is exchanged out-of-band.
 	// It has no effect for a client.
 	DisableVersionNegotiationPackets bool
-	// See https://datatracker.ietf.org/doc/draft-ietf-quic-datagram/.
-	// Datagrams will only be available when both peers enable datagram support.
+	// Enable QUIC datagram support (RFC 9221).
 	EnableDatagrams bool
 
 	// Logger is the logger to use.
