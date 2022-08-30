@@ -41,8 +41,6 @@ type (
 	Header = wire.Header
 	// The ExtendedHeader is the QUIC Long Header packet header, after removing header protection.
 	ExtendedHeader = wire.ExtendedHeader
-	// The ShortHeader is the QUIC Short Header packet header, after removing header protection.
-	ShortHeader = wire.ShortHeader
 	// The TransportParameters are QUIC transport parameters.
 	TransportParameters = wire.TransportParameters
 	// The PreferredAddress is the preferred address sent in the transport parameters.
@@ -88,3 +86,11 @@ const (
 	// StreamTypeBidi is a bidirectional stream
 	StreamTypeBidi = protocol.StreamTypeBidi
 )
+
+// The ShortHeader is the QUIC Short Header packet header, after removing header protection.
+type ShortHeader struct {
+	DestConnectionID ConnectionID
+	PacketNumber     PacketNumber
+	PacketNumberLen  protocol.PacketNumberLen
+	KeyPhase         KeyPhaseBit
+}
