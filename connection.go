@@ -213,7 +213,7 @@ type connection struct {
 
 	peerParams *wire.TransportParameters
 
-	timer *utils.Timer
+	timer connectionTimer
 	// keepAlivePingSent stores whether a keep alive PING is in flight.
 	// It is reset as soon as we receive a packet from the peer.
 	keepAlivePingSent bool
@@ -229,9 +229,6 @@ var (
 	_ Connection      = &connection{}
 	_ EarlyConnection = &connection{}
 	_ streamSender    = &connection{}
-
-	// note(cjs): removing this for performance
-	// deadlineSendImmediately                 = time.Time{}.Add(42 * time.Millisecond) // any value > time.Time{} and before time.Now() is fine
 )
 
 var newConnection = func(
@@ -537,7 +534,7 @@ func (s *connection) preSetup() {
 func (s *connection) run() error {
 	defer s.ctxCancel()
 
-	s.timer = utils.NewTimer()
+	s.timer = *newTimer()
 
 	handshaking := make(chan struct{})
 	go func() {
@@ -769,34 +766,12 @@ func (s *connection) maybeResetTimer() {
 		}
 	}
 
-	if ackAlarm := s.receivedPacketHandler.GetAlarmTimeout(); !ackAlarm.IsZero() {
-		deadline = utils.MinTime(deadline, ackAlarm)
-		if s.logger.Debug() {
-			s.logger.Debugf("alarm timeout is %s", time.Until(ackAlarm))
-		}
-	}
-	if lossTime := s.sentPacketHandler.GetLossDetectionTimeout(); !lossTime.IsZero() {
-		deadline = utils.MinTime(deadline, lossTime)
-		if s.logger.Debug() {
-			s.logger.Debugf("loss time is %s", time.Until(lossTime))
-		}
-	}
-	if pacingDeadline := s.pacingDeadline; !pacingDeadline.IsZero() { // && !s.pacingImmediate {
-		deadline = utils.MinTime(deadline, pacingDeadline)
-		if s.logger.Debug() {
-			s.logger.Debugf("pacing deadline is %s", time.Until(pacingDeadline))
-		}
-	}
-
-	if !deadline.IsZero() {
-		until := time.Until(deadline)
-		if until > 0 {
-			if s.logger.Debug() {
-				s.logger.Debugf("reset deadline to %s", until.Seconds())
-			}
-			s.timer.Reset(deadline)
-		}
-	}
+	s.timer.SetTimer(
+		deadline,
+		s.receivedPacketHandler.GetAlarmTimeout(),
+		s.sentPacketHandler.GetLossDetectionTimeout(),
+		s.pacingDeadline,
+	)
 }
 
 func (s *connection) idleTimeoutStartTime() time.Time {
@@ -1704,7 +1679,7 @@ func (s *connection) sendPackets() error {
 			}
 			// We can at most send a single ACK only packet.
 			// There will only be a new ACK after receiving new packets.
-			// SendAck is only returned when we're congestion limited, so we don't need to set the pacingt timer.
+			// SendAck is only returned when we're congestion limited, so we don't need to set the pacinggs timer.
 			return s.maybeSendAckOnlyPacket()
 		case ackhandler.SendPTOInitial:
 			if err := s.sendProbePacket(protocol.EncryptionInitial); err != nil {
