@@ -5,8 +5,8 @@ go 1.18
 require (
 	github.com/golang/mock v1.6.0
 	github.com/marten-seemann/qpack v0.2.1
-	github.com/marten-seemann/qtls-go1-18 v0.1.2
-	github.com/marten-seemann/qtls-go1-19 v0.1.0
+	github.com/marten-seemann/qtls-go1-18 v0.1.3
+	github.com/marten-seemann/qtls-go1-19 v0.1.1
 	github.com/onsi/ginkgo v1.16.4
 	github.com/onsi/gomega v1.13.0
 	github.com/sirupsen/logrus v1.9.0
