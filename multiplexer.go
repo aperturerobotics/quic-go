@@ -1,7 +1,6 @@
 package quic
 
 import (
-	"bytes"
 	"fmt"
 	"net"
 	"sync"
@@ -19,13 +18,13 @@ type indexableConn interface {
 }
 
 type multiplexer interface {
-	AddConn(c net.PacketConn, connIDLen int, statelessResetKey []byte, logger utils.Logger) (packetHandlerManager, error)
+	AddConn(c net.PacketConn, connIDLen int, statelessResetKey *StatelessResetKey, logger utils.Logger) (packetHandlerManager, error)
 	RemoveConn(indexableConn) error
 }
 
 type connManager struct {
 	connIDLen         int
-	statelessResetKey []byte
+	statelessResetKey *StatelessResetKey
 	manager           packetHandlerManager
 }
 
@@ -35,7 +34,7 @@ type connMultiplexer struct {
 	mutex sync.Mutex
 
 	conns                   map[string] /* LocalAddr().String() */ connManager
-	newPacketHandlerManager func(net.PacketConn, int, []byte, utils.Logger) (packetHandlerManager, error) // so it can be replaced in the tests
+	newPacketHandlerManager func(net.PacketConn, int, *StatelessResetKey, utils.Logger) (packetHandlerManager, error) // so it can be replaced in the tests
 }
 
 var _ multiplexer = &connMultiplexer{}
@@ -53,7 +52,7 @@ func getMultiplexer() multiplexer {
 func (m *connMultiplexer) AddConn(
 	c net.PacketConn,
 	connIDLen int,
-	statelessResetKey []byte,
+	statelessResetKey *StatelessResetKey,
 	logger utils.Logger,
 ) (packetHandlerManager, error) {
 	m.mutex.Lock()
@@ -77,7 +76,7 @@ func (m *connMultiplexer) AddConn(
 		if p.connIDLen != connIDLen {
 			return nil, fmt.Errorf("cannot use %d byte connection IDs on a connection that is already using %d byte connction IDs", connIDLen, p.connIDLen)
 		}
-		if statelessResetKey != nil && !bytes.Equal(p.statelessResetKey, statelessResetKey) {
+		if statelessResetKey != nil && p.statelessResetKey != statelessResetKey {
 			return nil, fmt.Errorf("cannot use different stateless reset keys on the same packet conn")
 		}
 	}

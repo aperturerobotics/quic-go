@@ -96,7 +96,7 @@ func setReceiveBuffer(c net.PacketConn, logger utils.Logger) error {
 func newPacketHandlerMap(
 	c net.PacketConn,
 	connIDLen int,
-	statelessResetKey []byte,
+	statelessResetKey *StatelessResetKey,
 	logger utils.Logger,
 ) (packetHandlerManager, error) {
 	if err := setReceiveBuffer(c, logger); err != nil {
@@ -116,9 +116,11 @@ func newPacketHandlerMap(
 		deleteRetiredConnsAfter: protocol.RetiredConnectionIDDeleteTimeout,
 		zeroRTTQueueDuration:    protocol.Max0RTTQueueingDuration,
 		closeQueue:              make(chan closePacket, 4),
-		statelessResetEnabled:   len(statelessResetKey) > 0,
-		statelessResetHasher:    hmac.New(sha256.New, statelessResetKey),
+		statelessResetEnabled:   statelessResetKey != nil,
 		logger:                  logger,
+	}
+	if m.statelessResetEnabled {
+		m.statelessResetHasher = hmac.New(sha256.New, statelessResetKey[:])
 	}
 	go m.listen()
 	go m.runCloseQueue()
