@@ -13,19 +13,11 @@ var (
 	connMuxer     multiplexer
 )
 
-type indexableConn interface {
-	LocalAddr() net.Addr
-}
+type indexableConn interface{ LocalAddr() net.Addr }
 
 type multiplexer interface {
-	AddConn(c net.PacketConn, connIDLen int, statelessResetKey *StatelessResetKey, logger utils.Logger) (packetHandlerManager, error)
+	AddConn(conn indexableConn)
 	RemoveConn(indexableConn) error
-}
-
-type connManager struct {
-	connIDLen         int
-	statelessResetKey *StatelessResetKey
-	manager           packetHandlerManager
 }
 
 // The connMultiplexer listens on multiple net.PacketConns and dispatches
@@ -33,8 +25,8 @@ type connManager struct {
 type connMultiplexer struct {
 	mutex sync.Mutex
 
-	conns                   map[string] /* LocalAddr().String() */ connManager
-	newPacketHandlerManager func(net.PacketConn, int, *StatelessResetKey, utils.Logger) (packetHandlerManager, error) // so it can be replaced in the tests
+	conns  map[string] /* LocalAddr().String() */ indexableConn
+	logger utils.Logger
 }
 
 var _ multiplexer = &connMultiplexer{}
@@ -42,52 +34,38 @@ var _ multiplexer = &connMultiplexer{}
 func getMultiplexer() multiplexer {
 	connMuxerOnce.Do(func() {
 		connMuxer = &connMultiplexer{
-			conns:                   make(map[string]connManager),
-			newPacketHandlerManager: newPacketHandlerMap,
+			conns:  make(map[string]indexableConn),
+			logger: utils.DefaultLogger.WithPrefix("muxer"),
 		}
 	})
 	return connMuxer
 }
 
-func (m *connMultiplexer) AddConn(
-	c net.PacketConn,
-	connIDLen int,
-	statelessResetKey *StatelessResetKey,
-	logger utils.Logger,
-) (packetHandlerManager, error) {
+func (m *connMultiplexer) index(addr net.Addr) string {
+	return addr.Network() + " " + addr.String()
+}
+
+func (m *connMultiplexer) AddConn(c indexableConn) {
 	m.mutex.Lock()
 	defer m.mutex.Unlock()
 
-	addr := c.LocalAddr()
-	connIndex := addr.Network() + " " + addr.String()
+	connIndex := m.index(c.LocalAddr())
 	p, ok := m.conns[connIndex]
-	if !ok {
-		manager, err := m.newPacketHandlerManager(c, connIDLen, statelessResetKey, logger)
-		if err != nil {
-			return nil, err
-		}
-		p = connManager{
-			connIDLen:         connIDLen,
-			statelessResetKey: statelessResetKey,
-			manager:           manager,
-		}
-		m.conns[connIndex] = p
-	} else {
-		if p.connIDLen != connIDLen {
-			return nil, fmt.Errorf("cannot use %d byte connection IDs on a connection that is already using %d byte connction IDs", connIDLen, p.connIDLen)
-		}
-		if statelessResetKey != nil && p.statelessResetKey != statelessResetKey {
-			return nil, fmt.Errorf("cannot use different stateless reset keys on the same packet conn")
-		}
+	if ok {
+		// Panics if we're already listening on this connection.
+		// This is a safeguard because we're introducing a breaking API change, see
+		// https://github.com/quic-go/quic-go/issues/3727 for details.
+		// We'll remove this at a later time, when most users of the library have made the switch.
+		panic("connection already exists") // TODO: write a nice message
 	}
-	return p.manager, nil
+	m.conns[connIndex] = p
 }
 
 func (m *connMultiplexer) RemoveConn(c indexableConn) error {
 	m.mutex.Lock()
 	defer m.mutex.Unlock()
 
-	connIndex := c.LocalAddr().Network() + " " + c.LocalAddr().String()
+	connIndex := m.index(c.LocalAddr())
 	if _, ok := m.conns[connIndex]; !ok {
 		return fmt.Errorf("cannote remove connection, connection is unknown")
 	}

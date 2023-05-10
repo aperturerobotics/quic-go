@@ -10,7 +10,6 @@ import (
 	"net"
 	"reflect"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/quic-go/quic-go/internal/ackhandler"
@@ -128,9 +127,6 @@ func (e *errCloseForRecreating) Error() string {
 	return "closing connection in order to recreate it"
 }
 
-var connTracingID uint64        // to be accessed atomically
-func nextConnTracingID() uint64 { return atomic.AddUint64(&connTracingID, 1) }
-
 // A Connection is a QUIC connection
 type connection struct {
 	// Destination connection ID used during the handshake.
@@ -242,6 +238,7 @@ var newConnection = func(
 	clientDestConnID protocol.ConnectionID,
 	destConnID protocol.ConnectionID,
 	srcConnID protocol.ConnectionID,
+	connIDGenerator ConnectionIDGenerator,
 	statelessResetToken protocol.StatelessResetToken,
 	conf *Config,
 	tlsConf *tls.Config,
@@ -282,7 +279,7 @@ var newConnection = func(
 		runner.Retire,
 		runner.ReplaceWithClosed,
 		s.queueControlFrame,
-		s.config.ConnectionIDGenerator,
+		connIDGenerator,
 	)
 	s.preSetup()
 	s.ctx, s.ctxCancel = context.WithCancel(context.Background())
@@ -318,10 +315,6 @@ var newConnection = func(
 	} else {
 		params.MaxDatagramFrameSize = protocol.InvalidByteCount
 	}
-	var allow0RTT func() bool
-	if conf.Allow0RTT != nil {
-		allow0RTT = func() bool { return conf.Allow0RTT(conn.RemoteAddr()) }
-	}
 	cs := handshake.NewCryptoSetupServer(
 		initialStream,
 		handshakeStream,
@@ -339,7 +332,7 @@ var newConnection = func(
 			},
 		},
 		tlsConf,
-		allow0RTT,
+		conf.Allow0RTT,
 		s.rttStats,
 		logger,
 		s.version,
@@ -357,6 +350,7 @@ var newClientConnection = func(
 	runner connRunner,
 	destConnID protocol.ConnectionID,
 	srcConnID protocol.ConnectionID,
+	connIDGenerator ConnectionIDGenerator,
 	conf *Config,
 	tlsConf *tls.Config,
 	initialPacketNumber protocol.PacketNumber,
@@ -393,7 +387,7 @@ var newClientConnection = func(
 		runner.Retire,
 		runner.ReplaceWithClosed,
 		s.queueControlFrame,
-		s.config.ConnectionIDGenerator,
+		connIDGenerator,
 	)
 	s.preSetup()
 	s.ctx, s.ctxCancel = context.WithCancel(context.Background())
