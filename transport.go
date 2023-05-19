@@ -164,8 +164,6 @@ func (t *Transport) DialEarly(ctx context.Context, addr net.Addr, tlsConf *tls.C
 
 func (t *Transport) init(isServer bool) error {
 	t.initOnce.Do(func() {
-		getMultiplexer().AddConn(t.Conn)
-
 		conn, err := wrapConn(t.Conn)
 		if err != nil {
 			t.initErr = err
@@ -270,7 +268,6 @@ var setBufferWarningOnce sync.Once
 
 func (t *Transport) listen(conn rawConn) {
 	defer close(t.listening)
-	defer getMultiplexer().RemoveConn(t.Conn)
 
 	if err := setReceiveBuffer(t.Conn, t.logger); err != nil {
 		if !strings.Contains(err.Error(), "use of closed network connection") {
