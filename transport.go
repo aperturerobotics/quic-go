@@ -5,11 +5,7 @@ import (
 	"crypto/rand"
 	"crypto/tls"
 	"errors"
-	"log"
 	"net"
-	"os"
-	"strconv"
-	"strings"
 	"sync"
 	"time"
 
@@ -19,14 +15,26 @@ import (
 	"github.com/quic-go/quic-go/internal/utils"
 )
 
+// The Transport is the central point to manage incoming and outgoing QUIC connections.
+// QUIC demultiplexes connections based on their QUIC Connection IDs, not based on the 4-tuple.
+// This means that a single UDP socket can be used for listening for incoming connections, as well as
+// for dialing an arbitrary number of outgoing connections.
+// A Transport handles a single net.PacketConn, and offers a range of configuration options
+// compared to the simple helper functions like Listen and Dial that this package provides.
 type Transport struct {
 	// A single net.PacketConn can only be handled by one Transport.
 	// Bad things will happen if passed to multiple Transports.
 	//
-	// If the connection satisfies the OOBCapablePacketConn interface
-	// (as a net.UDPConn does), ECN and packet info support will be enabled.
-	// In this case, optimized syscalls might be used, skipping the
-	// ReadFrom and WriteTo calls to read / write packets.
+	// A number of optimizations will be enabled if the connections implements the OOBCapablePacketConn interface,
+	// as a *net.UDPConn does.
+	// 1. It enables the Don't Fragment (DF) bit on the IP header.
+	//    This is required to run DPLPMTUD (Path MTU Discovery, RFC 8899).
+	// 2. It enables reading of the ECN bits from the IP header.
+	//    This allows the remote node to speed up its loss detection and recovery.
+	// 3. It uses batched syscalls (recvmmsg) to more efficiently receive packets from the socket.
+	// 4. It uses Generic Segmentation Offload (GSO) to efficiently send batches of packets (on Linux).
+	//
+	// After passing the connection to the Transport, it's invalid to call ReadFrom or WriteTo on the connection.
 	Conn net.PacketConn
 
 	// The length of the connection ID in bytes.
@@ -43,6 +51,9 @@ type Transport struct {
 
 	// The StatelessResetKey is used to generate stateless reset tokens.
 	// If no key is configured, sending of stateless resets is disabled.
+	// It is highly recommended to configure a stateless reset key, as stateless resets
+	// allow the peer to quickly recover from crashes and reboots of this node.
+	// See section 10.3 of RFC 9000 for details.
 	StatelessResetKey *StatelessResetKey
 
 	handlerMap packetHandlerManager
@@ -63,7 +74,7 @@ type Transport struct {
 	conn rawConn
 
 	closeQueue          chan closePacket
-	statelessResetQueue chan *receivedPacket
+	statelessResetQueue chan receivedPacket
 
 	listening   chan struct{} // is closed when listen returns
 	closed      bool
@@ -91,7 +102,7 @@ func (t *Transport) Listen(tlsConf *tls.Config, conf *Config) (*Listener, error)
 		return nil, errListenerAlreadySet
 	}
 	conf = populateServerConfig(conf)
-	if err := t.init(true); err != nil {
+	if err := t.init(false); err != nil {
 		return nil, err
 	}
 	s, err := newServer(t.conn, t.handlerMap, t.connIDGenerator, tlsConf, conf, t.closeServer, false)
@@ -120,7 +131,7 @@ func (t *Transport) ListenEarly(tlsConf *tls.Config, conf *Config) (*EarlyListen
 		return nil, errListenerAlreadySet
 	}
 	conf = populateServerConfig(conf)
-	if err := t.init(true); err != nil {
+	if err := t.init(false); err != nil {
 		return nil, err
 	}
 	s, err := newServer(t.conn, t.handlerMap, t.connIDGenerator, tlsConf, conf, t.closeServer, true)
@@ -137,14 +148,16 @@ func (t *Transport) Dial(ctx context.Context, addr net.Addr, tlsConf *tls.Config
 		return nil, err
 	}
 	conf = populateConfig(conf)
-	if err := t.init(false); err != nil {
+	if err := t.init(t.isSingleUse); err != nil {
 		return nil, err
 	}
 	var onClose func()
 	if t.isSingleUse {
 		onClose = func() { t.Close() }
 	}
-	return dial(ctx, newSendConn(t.conn, addr, nil), t.connIDGenerator, t.handlerMap, tlsConf, conf, onClose, false)
+	tlsConf = tlsConf.Clone()
+	tlsConf.MinVersion = tls.VersionTLS13
+	return dial(ctx, newSendConn(t.conn, addr), t.connIDGenerator, t.handlerMap, tlsConf, conf, onClose, false)
 }
 
 // DialEarly dials a new connection, attempting to use 0-RTT if possible.
@@ -153,23 +166,32 @@ func (t *Transport) DialEarly(ctx context.Context, addr net.Addr, tlsConf *tls.C
 		return nil, err
 	}
 	conf = populateConfig(conf)
-	if err := t.init(false); err != nil {
+	if err := t.init(t.isSingleUse); err != nil {
 		return nil, err
 	}
 	var onClose func()
 	if t.isSingleUse {
 		onClose = func() { t.Close() }
 	}
-	return dial(ctx, newSendConn(t.conn, addr, nil), t.connIDGenerator, t.handlerMap, tlsConf, conf, onClose, true)
+	tlsConf = tlsConf.Clone()
+	tlsConf.MinVersion = tls.VersionTLS13
+	return dial(ctx, newSendConn(t.conn, addr), t.connIDGenerator, t.handlerMap, tlsConf, conf, onClose, true)
 }
 
-func (t *Transport) init(isServer bool) error {
+func (t *Transport) init(allowZeroLengthConnIDs bool) error {
 	t.initOnce.Do(func() {
-		conn, err := wrapConn(t.Conn)
-		if err != nil {
-			t.initErr = err
-			return
+		var conn rawConn
+		if c, ok := t.Conn.(rawConn); ok {
+			conn = c
+		} else {
+			var err error
+			conn, err = wrapConn(t.Conn)
+			if err != nil {
+				t.initErr = err
+				return
+			}
 		}
+		t.conn = conn
 
 		t.logger = utils.DefaultLogger // TODO: make this configurable
 		t.conn = conn
@@ -177,14 +199,14 @@ func (t *Transport) init(isServer bool) error {
 		t.listening = make(chan struct{})
 
 		t.closeQueue = make(chan closePacket, 4)
-		t.statelessResetQueue = make(chan *receivedPacket, 4)
+		t.statelessResetQueue = make(chan receivedPacket, 4)
 
 		if t.ConnectionIDGenerator != nil {
 			t.connIDGenerator = t.ConnectionIDGenerator
 			t.connIDLen = t.ConnectionIDGenerator.ConnectionIDLen()
 		} else {
 			connIDLen := t.ConnectionIDLength
-			if t.ConnectionIDLength == 0 && (!t.isSingleUse || isServer) {
+			if t.ConnectionIDLength == 0 && !allowZeroLengthConnIDs {
 				connIDLen = protocol.DefaultConnectionIDLength
 			}
 			t.connIDLen = connIDLen
@@ -195,6 +217,14 @@ func (t *Transport) init(isServer bool) error {
 		go t.runSendQueue()
 	})
 	return t.initErr
+}
+
+// WriteTo sends a packet on the underlying connection.
+func (t *Transport) WriteTo(b []byte, addr net.Addr) (int, error) {
+	if err := t.init(false); err != nil {
+		return 0, err
+	}
+	return t.conn.WritePacket(b, uint16(len(b)), addr, nil)
 }
 
 func (t *Transport) enqueueClosePacket(p closePacket) {
@@ -212,7 +242,7 @@ func (t *Transport) runSendQueue() {
 		case <-t.listening:
 			return
 		case p := <-t.closeQueue:
-			t.conn.WritePacket(p.payload, p.addr, p.info.OOB())
+			t.conn.WritePacket(p.payload, uint16(len(p.payload)), p.addr, p.info.OOB())
 		case p := <-t.statelessResetQueue:
 			t.sendStatelessReset(p)
 		}
@@ -224,14 +254,16 @@ func (t *Transport) runSendQueue() {
 func (t *Transport) Close() error {
 	t.close(errors.New("closing"))
 	if t.createdConn {
-		if err := t.conn.Close(); err != nil {
+		if err := t.Conn.Close(); err != nil {
 			return err
 		}
-	} else {
+	} else if t.conn != nil {
 		t.conn.SetReadDeadline(time.Now())
 		defer func() { t.conn.SetReadDeadline(time.Time{}) }()
 	}
-	<-t.listening // wait until listening returns
+	if t.listening != nil {
+		<-t.listening // wait until listening returns
+	}
 	return nil
 }
 
@@ -260,7 +292,9 @@ func (t *Transport) close(e error) {
 		return
 	}
 
-	t.handlerMap.Close(e)
+	if t.handlerMap != nil {
+		t.handlerMap.Close(e)
+	}
 	if t.server != nil {
 		t.server.setCloseError(e)
 	}
@@ -272,27 +306,6 @@ var setBufferWarningOnce sync.Once
 
 func (t *Transport) listen(conn rawConn) {
 	defer close(t.listening)
-
-	if err := setReceiveBuffer(t.Conn, t.logger); err != nil {
-		if !strings.Contains(err.Error(), "use of closed network connection") {
-			setBufferWarningOnce.Do(func() {
-				if disable, _ := strconv.ParseBool(os.Getenv("QUIC_GO_DISABLE_RECEIVE_BUFFER_WARNING")); disable {
-					return
-				}
-				log.Printf("%s. See https://github.com/quic-go/quic-go/wiki/UDP-Receive-Buffer-Size for details.", err)
-			})
-		}
-	}
-	if err := setSendBuffer(t.Conn, t.logger); err != nil {
-		if !strings.Contains(err.Error(), "use of closed network connection") {
-			setBufferWarningOnce.Do(func() {
-				if disable, _ := strconv.ParseBool(os.Getenv("QUIC_GO_DISABLE_RECEIVE_BUFFER_WARNING")); disable {
-					return
-				}
-				log.Printf("%s. See https://github.com/quic-go/quic-go/wiki/UDP-Receive-Buffer-Size for details.", err)
-			})
-		}
-	}
 
 	for {
 		p, err := conn.ReadPacket()
@@ -311,6 +324,10 @@ func (t *Transport) listen(conn rawConn) {
 			continue
 		}
 		if err != nil {
+			// Windows returns an error when receiving a UDP datagram that doesn't fit into the provided buffer.
+			if isRecvMsgSizeErr(err) {
+				continue
+			}
 			t.close(err)
 			return
 		}
@@ -318,7 +335,7 @@ func (t *Transport) listen(conn rawConn) {
 	}
 }
 
-func (t *Transport) handlePacket(p *receivedPacket) {
+func (t *Transport) handlePacket(p receivedPacket) {
 	connID, err := wire.ParseConnectionID(p.data, t.connIDLen)
 	if err != nil {
 		t.logger.Debugf("error parsing connection ID on packet from %s: %s", p.remoteAddr, err)
@@ -347,7 +364,7 @@ func (t *Transport) handlePacket(p *receivedPacket) {
 	t.server.handlePacket(p)
 }
 
-func (t *Transport) maybeSendStatelessReset(p *receivedPacket) {
+func (t *Transport) maybeSendStatelessReset(p receivedPacket) {
 	if t.StatelessResetKey == nil {
 		p.buffer.Release()
 		return
@@ -368,7 +385,7 @@ func (t *Transport) maybeSendStatelessReset(p *receivedPacket) {
 	}
 }
 
-func (t *Transport) sendStatelessReset(p *receivedPacket) {
+func (t *Transport) sendStatelessReset(p receivedPacket) {
 	defer p.buffer.Release()
 
 	connID, err := wire.ParseConnectionID(p.data, t.connIDLen)
@@ -382,7 +399,7 @@ func (t *Transport) sendStatelessReset(p *receivedPacket) {
 	rand.Read(data)
 	data[0] = (data[0] & 0x7f) | 0x40
 	data = append(data, token[:]...)
-	if _, err := t.conn.WritePacket(data, p.remoteAddr, p.info.OOB()); err != nil {
+	if _, err := t.conn.WritePacket(data, uint16(len(data)), p.remoteAddr, p.info.OOB()); err != nil {
 		t.logger.Debugf("Error sending Stateless Reset to %s: %s", p.remoteAddr, err)
 	}
 }

@@ -62,8 +62,6 @@ func versionToALPN(v protocol.VersionNumber) string {
 	switch v {
 	case protocol.Version1, protocol.Version2:
 		return NextProtoH3
-	case protocol.VersionDraft29:
-		return NextProtoH3Draft29
 	default:
 		return ""
 	}
@@ -262,13 +260,26 @@ func (s *Server) ServeQUICConn(conn quic.Connection) error {
 // Make sure you use http3.ConfigureTLSConfig to configure a tls.Config
 // and use it to construct a http3-friendly QUIC listener.
 // Closing the server does close the listener.
+// ServeListener always returns a non-nil error. After Shutdown or Close, the returned error is http.ErrServerClosed.
 func (s *Server) ServeListener(ln QUICEarlyListener) error {
 	if err := s.addListener(&ln); err != nil {
 		return err
 	}
-	err := s.serveListener(ln)
-	s.removeListener(&ln)
-	return err
+	defer s.removeListener(&ln)
+	for {
+		conn, err := ln.Accept(context.Background())
+		if err == quic.ErrServerClosed {
+			return http.ErrServerClosed
+		}
+		if err != nil {
+			return err
+		}
+		go func() {
+			if err := s.handleConn(conn); err != nil {
+				s.logger.Debugf(err.Error())
+			}
+		}()
+	}
 }
 
 var errServerWithoutTLSConfig = errors.New("use of http3.Server without TLSConfig")
@@ -310,26 +321,7 @@ func (s *Server) serveConn(tlsConf *tls.Config, conn net.PacketConn) error {
 	if err != nil {
 		return err
 	}
-	if err := s.addListener(&ln); err != nil {
-		return err
-	}
-	err = s.serveListener(ln)
-	s.removeListener(&ln)
-	return err
-}
-
-func (s *Server) serveListener(ln QUICEarlyListener) error {
-	for {
-		conn, err := ln.Accept(context.Background())
-		if err != nil {
-			return err
-		}
-		go func() {
-			if err := s.handleConn(conn); err != nil {
-				s.logger.Debugf(err.Error())
-			}
-		}()
-	}
+	return s.ServeListener(ln)
 }
 
 func extractPort(addr string) (int, error) {
@@ -581,14 +573,22 @@ func (s *Server) handleRequest(conn quic.Connection, str quic.Stream, decoder *q
 	}
 	req, err := requestFromHeaders(hfs)
 	if err != nil {
-		// TODO: use the right error code
-		return newStreamError(ErrCodeGeneralProtocolError, err)
+		return newStreamError(ErrCodeMessageError, err)
 	}
 
-	connState := conn.ConnectionState().TLS.ConnectionState
+	connState := conn.ConnectionState().TLS
 	req.TLS = &connState
 	req.RemoteAddr = conn.RemoteAddr().String()
-	body := newRequestBody(newStream(str, onFrameError))
+
+	// Check that the client doesn't send more data in DATA frames than indicated by the Content-Length header (if set).
+	// See section 4.1.2 of RFC 9114.
+	var httpStr Stream
+	if _, ok := req.Header["Content-Length"]; ok && req.ContentLength >= 0 {
+		httpStr = newLengthLimitedStream(newStream(str, onFrameError), req.ContentLength)
+	} else {
+		httpStr = newStream(str, onFrameError)
+	}
+	body := newRequestBody(httpStr)
 	req.Body = body
 
 	if s.logger.Debug() {
@@ -602,7 +602,6 @@ func (s *Server) handleRequest(conn quic.Connection, str quic.Stream, decoder *q
 	ctx = context.WithValue(ctx, http.LocalAddrContextKey, conn.LocalAddr())
 	req = req.WithContext(ctx)
 	r := newResponseWriter(str, conn, s.logger)
-	defer r.Flush()
 	handler := s.Handler
 	if handler == nil {
 		handler = http.DefaultServeMux
@@ -630,10 +629,10 @@ func (s *Server) handleRequest(conn quic.Connection, str quic.Stream, decoder *q
 		return requestError{err: errHijacked}
 	}
 
-	if panicked {
-		r.WriteHeader(http.StatusInternalServerError)
-	} else {
+	// only write response when there is no panic
+	if !panicked {
 		r.WriteHeader(http.StatusOK)
+		r.Flush()
 	}
 	// If the EOF was read by the handler, CancelRead() is a no-op.
 	str.CancelRead(quic.StreamErrorCode(ErrCodeNoError))
