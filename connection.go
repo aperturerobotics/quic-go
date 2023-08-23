@@ -238,7 +238,7 @@ var newConnection = func(
 		handshakeDestConnID: destConnID,
 		srcConnIDLen:        srcConnID.Len(),
 		tokenGenerator:      tokenGenerator,
-		oneRTTStream:        newCryptoStream(),
+		oneRTTStream:        newCryptoStream(true),
 		perspective:         protocol.PerspectiveServer,
 		logger:              logger,
 		version:             v,
@@ -377,7 +377,7 @@ var newClientConnection = func(
 		s.logger,
 	)
 	s.mtuDiscoverer = newMTUDiscoverer(s.rttStats, getMaxPacketSize(s.conn.RemoteAddr()), s.sentPacketHandler.SetMaxDatagramSize)
-	oneRTTStream := newCryptoStream()
+	oneRTTStream := newCryptoStream(true)
 	params := &wire.TransportParameters{
 		InitialMaxStreamDataBidiRemote: protocol.ByteCount(s.config.InitialStreamReceiveWindow),
 		InitialMaxStreamDataBidiLocal:  protocol.ByteCount(s.config.InitialStreamReceiveWindow),
@@ -429,8 +429,8 @@ var newClientConnection = func(
 }
 
 func (s *connection) preSetup() {
-	s.initialStream = newCryptoStream()
-	s.handshakeStream = newCryptoStream()
+	s.initialStream = newCryptoStream(false)
+	s.handshakeStream = newCryptoStream(false)
 	s.sendQueue = newSendQueue(s.conn)
 	s.retransmissionQueue = newRetransmissionQueue()
 	s.frameParser = wire.NewFrameParser(s.config.EnableDatagrams)

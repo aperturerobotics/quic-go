@@ -576,7 +576,7 @@ func (s *baseServer) handleInitialImpl(p receivedPacket, hdr *wire.Header) error
 			config = populateConfig(conf)
 		}
 		conn = s.newConn(
-			newSendConnWithPacketInfo(s.conn, p.remoteAddr, p.info),
+			newSendConn(s.conn, p.remoteAddr, p.info, s.logger),
 			s.connHandler,
 			origDestConnID,
 			retrySrcConnID,
@@ -681,7 +681,7 @@ func (s *baseServer) sendRetry(remoteAddr net.Addr, hdr *wire.Header, info packe
 	// append the Retry integrity tag
 	tag := handshake.GetRetryIntegrityTag(buf.Data, hdr.DestConnectionID, hdr.Version)
 	buf.Data = append(buf.Data, tag[:]...)
-	_, err = s.conn.WritePacket(buf.Data, uint16(len(buf.Data)), remoteAddr, info.OOB())
+	_, err = s.conn.WritePacket(buf.Data, remoteAddr, info.OOB())
 	return err
 }
 
@@ -768,7 +768,7 @@ func (s *baseServer) sendError(remoteAddr net.Addr, hdr *wire.Header, sealer han
 
 	replyHdr.Log(s.logger)
 	wire.LogFrame(s.logger, ccf, true)
-	_, err = s.conn.WritePacket(b.Data, uint16(len(b.Data)), remoteAddr, info.OOB())
+	_, err = s.conn.WritePacket(b.Data, remoteAddr, info.OOB())
 	return err
 }
 
@@ -800,7 +800,7 @@ func (s *baseServer) maybeSendVersionNegotiationPacket(p receivedPacket) {
 	s.logger.Debugf("Client offered version %s, sending Version Negotiation", v)
 
 	data := wire.ComposeVersionNegotiation(dest, src, s.config.Versions)
-	if _, err := s.conn.WritePacket(data, uint16(len(data)), p.remoteAddr, p.info.OOB()); err != nil {
+	if _, err := s.conn.WritePacket(data, p.remoteAddr, p.info.OOB()); err != nil {
 		s.logger.Debugf("Error sending Version Negotiation: %s", err)
 	}
 }
