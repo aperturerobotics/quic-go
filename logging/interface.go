@@ -12,6 +12,8 @@ import (
 type (
 	// A ByteCount is used to count bytes.
 	ByteCount = protocol.ByteCount
+	// ECN is the ECN value
+	ECN = protocol.ECN
 	// A ConnectionID is a QUIC Connection ID.
 	ConnectionID = protocol.ConnectionID
 	// An ArbitraryLenConnectionID is a QUIC Connection ID that can be up to 255 bytes long.
@@ -53,6 +55,19 @@ type (
 
 	// The RTTStats contain statistics used by the congestion controller.
 	RTTStats = utils.RTTStats
+)
+
+const (
+	// ECNUnsupported means that no ECN value was set / received
+	ECNUnsupported = protocol.ECNUnsupported
+	// ECTNot is Not-ECT
+	ECTNot = protocol.ECNNon
+	// ECT0 is ECT(0)
+	ECT0 = protocol.ECT0
+	// ECT1 is ECT(1)
+	ECT1 = protocol.ECT1
+	// ECNCE is CE
+	ECNCE = protocol.ECNCE
 )
 
 const (

@@ -33,7 +33,6 @@ type client struct {
 
 	conn quicConn
 
-	// tracer logging.ConnectionTracer
 	logger utils.Logger
 }
 
@@ -222,7 +221,7 @@ func (c *client) dial(ctx context.Context) error {
 	select {
 	case <-ctx.Done():
 		c.conn.shutdown()
-		return ctx.Err()
+		return context.Cause(ctx)
 	case err := <-errorChan:
 		return err
 	case recreateErr := <-recreateChan:

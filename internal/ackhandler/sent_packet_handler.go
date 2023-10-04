@@ -91,6 +91,9 @@ type sentPacketHandler struct {
 	// The alarm timeout
 	alarm time.Time
 
+	enableECN  bool
+	ecnTracker ecnHandler
+
 	perspective protocol.Perspective
 
 	logger utils.Logger
@@ -108,6 +111,7 @@ func newSentPacketHandler(
 	initialMaxDatagramSize protocol.ByteCount,
 	rttStats *utils.RTTStats,
 	clientAddressValidated bool,
+	enableECN bool,
 	pers protocol.Perspective,
 	logger utils.Logger,
 ) *sentPacketHandler {
@@ -118,7 +122,7 @@ func newSentPacketHandler(
 		true, // use Reno
 	)
 
-	return &sentPacketHandler{
+	h := &sentPacketHandler{
 		peerCompletedAddressValidation: pers == protocol.PerspectiveServer,
 		peerAddressValidated:           pers == protocol.PerspectiveClient || clientAddressValidated,
 		initialPackets:                 newPacketNumberSpace(initialPN, false),
@@ -129,6 +133,11 @@ func newSentPacketHandler(
 		perspective:                    pers,
 		logger:                         logger,
 	}
+	if enableECN {
+		h.enableECN = true
+		h.ecnTracker = newECNTracker(logger)
+	}
+	return h
 }
 
 func (h *sentPacketHandler) removeFromBytesInFlight(p *packet) {
@@ -220,6 +229,7 @@ func (h *sentPacketHandler) SentPacket(
 	streamFrames []StreamFrame,
 	frames []Frame,
 	encLevel protocol.EncryptionLevel,
+	ecn protocol.ECN,
 	size protocol.ByteCount,
 	isPathMTUProbePacket bool,
 ) {
@@ -244,6 +254,10 @@ func (h *sentPacketHandler) SentPacket(
 	}
 
 	h.congestion.OnPacketSent(t, h.bytesInFlight, pn, size, isAckEliciting)
+
+	if encLevel == protocol.Encryption1RTT && h.ecnTracker != nil {
+		h.ecnTracker.SentPacket(pn, ecn)
+	}
 
 	if !isAckEliciting {
 		pnSpace.history.SentNonAckElicitingPacket(pn)
@@ -292,8 +306,6 @@ func (h *sentPacketHandler) ReceivedAck(ack *wire.AckFrame, encLevel protocol.En
 		}
 	}
 
-	pnSpace.largestAcked = utils.Max(pnSpace.largestAcked, largestAcked)
-
 	// Servers complete address validation when a protected packet is received.
 	if h.perspective == protocol.PerspectiveClient && !h.peerCompletedAddressValidation &&
 		(encLevel == protocol.EncryptionHandshake || encLevel == protocol.Encryption1RTT) {
@@ -323,6 +335,17 @@ func (h *sentPacketHandler) ReceivedAck(ack *wire.AckFrame, encLevel protocol.En
 			h.congestion.MaybeExitSlowStart()
 		}
 	}
+
+	// Only inform the ECN tracker about new 1-RTT ACKs if the ACK increases the largest acked.
+	if encLevel == protocol.Encryption1RTT && h.ecnTracker != nil && largestAcked > pnSpace.largestAcked {
+		congested := h.ecnTracker.HandleNewlyAcked(ackedPackets, int64(ack.ECT0), int64(ack.ECT1), int64(ack.ECNCE))
+		if congested {
+			h.congestion.OnCongestionEvent(largestAcked, 0, priorInFlight)
+		}
+	}
+
+	pnSpace.largestAcked = utils.Max(pnSpace.largestAcked, largestAcked)
+
 	if err := h.detectLostPackets(rcvTime, encLevel); err != nil {
 		return false, err
 	}
@@ -507,35 +530,39 @@ func (h *sentPacketHandler) hasOutstandingPackets() bool {
 }
 
 func (h *sentPacketHandler) setLossDetectionTimer() {
+	oldAlarm := h.alarm
 	lossTime, encLevel := h.getLossTimeAndSpace()
 	if !lossTime.IsZero() {
 		// Early retransmit timer or time loss detection.
 		h.alarm = lossTime
-		_ = encLevel
 		return
 	}
 
 	// Cancel the alarm if amplification limited.
 	if h.isAmplificationLimited() {
 		h.alarm = time.Time{}
+		if !oldAlarm.IsZero() {
+			h.logger.Debugf("Canceling loss detection timer. Amplification limited.")
+		}
 		return
 	}
 
 	// Cancel the alarm if no packets are outstanding
 	if !h.hasOutstandingPackets() && h.peerCompletedAddressValidation {
 		h.alarm = time.Time{}
+		if !oldAlarm.IsZero() {
+			h.logger.Debugf("Canceling loss detection timer. No packets in flight.")
+		}
 		return
 	}
 
 	// PTO alarm
 	ptoTime, encLevel, ok := h.getPTOTimeAndSpace()
 	if !ok {
-		/*
-			if !oldAlarm.IsZero() {
-				h.alarm = time.Time{}
-				h.logger.Debugf("Canceling loss detection timer. No PTO needed..")
-			}
-		*/
+		if !oldAlarm.IsZero() {
+			h.alarm = time.Time{}
+			h.logger.Debugf("Canceling loss detection timer. No PTO needed..")
+		}
 		return
 	}
 	_ = encLevel
@@ -591,7 +618,10 @@ func (h *sentPacketHandler) detectLostPackets(now time.Time, encLevel protocol.E
 				h.removeFromBytesInFlight(p)
 				h.queueFramesForRetransmission(p)
 				if !p.IsPathMTUProbePacket {
-					h.congestion.OnPacketLost(p.PacketNumber, p.Length, priorInFlight)
+					h.congestion.OnCongestionEvent(p.PacketNumber, p.Length, priorInFlight)
+				}
+				if encLevel == protocol.Encryption1RTT && h.ecnTracker != nil {
+					h.ecnTracker.LostPacket(p.PacketNumber)
 				}
 			}
 		}
@@ -659,6 +689,16 @@ func (h *sentPacketHandler) OnLossDetectionTimeout() error {
 
 func (h *sentPacketHandler) GetLossDetectionTimeout() time.Time {
 	return h.alarm
+}
+
+func (h *sentPacketHandler) ECNMode(isShortHeaderPacket bool) protocol.ECN {
+	if !h.enableECN {
+		return protocol.ECNUnsupported
+	}
+	if !isShortHeaderPacket {
+		return protocol.ECNNon
+	}
+	return h.ecnTracker.Mode()
 }
 
 func (h *sentPacketHandler) PeekPacketNumber(encLevel protocol.EncryptionLevel) (protocol.PacketNumber, protocol.PacketNumberLen) {
@@ -773,7 +813,7 @@ func (h *sentPacketHandler) queueFramesForRetransmission(p *packet) {
 	p.Frames = nil
 }
 
-func (h *sentPacketHandler) ResetForRetry() error {
+func (h *sentPacketHandler) ResetForRetry(now time.Time) error {
 	h.bytesInFlight = 0
 	var firstPacketSendTime time.Time
 	h.initialPackets.history.Iterate(func(p *packet) (bool, error) {
@@ -799,7 +839,6 @@ func (h *sentPacketHandler) ResetForRetry() error {
 	// Otherwise, we don't know which Initial the Retry was sent in response to.
 	if h.ptoCount == 0 {
 		// Don't set the RTT to a value lower than 5ms here.
-		now := time.Now()
 		h.rttStats.UpdateRTT(utils.Max(minRTTAfterRetry, now.Sub(firstPacketSendTime)), 0, now)
 		if h.logger.Debug() {
 			h.logger.Debugf("\tupdated RTT: %s (σ: %s)", h.rttStats.SmoothedRTT(), h.rttStats.MeanDeviation())
