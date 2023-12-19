@@ -30,6 +30,7 @@ var (
 	quicListenAddr = func(addr string, tlsConf *tls.Config, config *quic.Config) (QUICEarlyListener, error) {
 		return quic.ListenAddrEarly(addr, tlsConf, config)
 	}
+	errPanicked = errors.New("panicked")
 )
 
 // NextProtoH3 is the ALPN protocol negotiated during the TLS handshake, for QUIC v1 and v2.
@@ -114,6 +115,16 @@ func (k *contextKey) String() string { return "quic-go/http3 context value " + k
 // started the handler. The associated value will be of
 // type *http3.Server.
 var ServerContextKey = &contextKey{"http3-server"}
+
+// RemoteAddrContextKey is a context key. It can be used in
+// HTTP handlers with Context.Value to access the remote
+// address of the connection. The associated value will be of
+// type net.Addr.
+//
+// Use this value instead of [http.Request.RemoteAddr] if you
+// require access to the remote address of the connection rather
+// than its string representation.
+var RemoteAddrContextKey = &contextKey{"remote-addr"}
 
 type requestError struct {
 	err       error
@@ -273,7 +284,7 @@ func (s *Server) ServeListener(ln QUICEarlyListener) error {
 		}
 		go func() {
 			if err := s.handleConn(conn); err != nil {
-				s.logger.Debugf(err.Error())
+				s.logger.Debugf("handling connection failed: %s", err)
 			}
 		}()
 	}
@@ -407,10 +418,11 @@ func (s *Server) addListener(l *QUICEarlyListener) error {
 		s.listeners = make(map[*QUICEarlyListener]listenerInfo)
 	}
 
-	if port, err := extractPort((*l).Addr().String()); err == nil {
+	laddr := (*l).Addr()
+	if port, err := extractPort(laddr.String()); err == nil {
 		s.listeners[l] = listenerInfo{port}
 	} else {
-		s.logger.Errorf("Unable to extract port from listener %+v, will not be announced using SetQuicHeaders: %s", err)
+		s.logger.Errorf("Unable to extract port from listener %s, will not be announced using SetQuicHeaders: %s", laddr, err)
 		s.listeners[l] = listenerInfo{}
 	}
 	s.generateAltSvcHeader()
@@ -597,8 +609,12 @@ func (s *Server) handleRequest(conn quic.Connection, str quic.Stream, decoder *q
 	ctx := str.Context()
 	ctx = context.WithValue(ctx, ServerContextKey, s)
 	ctx = context.WithValue(ctx, http.LocalAddrContextKey, conn.LocalAddr())
+	ctx = context.WithValue(ctx, RemoteAddrContextKey, conn.RemoteAddr())
 	req = req.WithContext(ctx)
 	r := newResponseWriter(str, conn, s.logger)
+	if req.Method == http.MethodHead {
+		r.isHead = true
+	}
 	handler := s.Handler
 	if handler == nil {
 		handler = http.DefaultServeMux
@@ -638,6 +654,11 @@ func (s *Server) handleRequest(conn quic.Connection, str quic.Stream, decoder *q
 	}
 	// If the EOF was read by the handler, CancelRead() is a no-op.
 	str.CancelRead(quic.StreamErrorCode(ErrCodeNoError))
+
+	// abort the stream when there is a panic
+	if panicked {
+		return newStreamError(ErrCodeInternalError, errPanicked)
+	}
 	return requestError{}
 }
 

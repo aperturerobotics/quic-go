@@ -24,7 +24,7 @@ type quicVersionContextKey struct{}
 
 var QUICVersionContextKey = &quicVersionContextKey{}
 
-const clientSessionStateRevision = 3
+const clientSessionStateRevision = 4
 
 type cryptoSetup struct {
 	tlsConf *tls.Config
@@ -92,6 +92,7 @@ func NewCryptoSetupClient(
 	quicConf := &qtls.QUICConfig{TLSConfig: tlsConf}
 	qtls.SetupConfigForClient(quicConf, cs.marshalDataForSessionState, cs.handleDataFromSessionState)
 	cs.tlsConf = tlsConf
+	cs.allow0RTT = enable0RTT
 
 	cs.conn = qtls.QUICClient(quicConf)
 	cs.conn.SetTransportParameters(cs.ourParams.Marshal(protocol.PerspectiveClient))
@@ -140,6 +141,9 @@ func addConnToClientHelloInfo(conf *tls.Config, localAddr, remoteAddr net.Addr) 
 			info.Conn = &conn{localAddr: localAddr, remoteAddr: remoteAddr}
 			c, err := gcfc(info)
 			if c != nil {
+				c = c.Clone()
+				// This won't be necessary anymore once https://github.com/golang/go/issues/63722 is accepted.
+				c.MinVersion = tls.VersionTLS13
 				// We're returning a tls.Config here, so we need to apply this recursively.
 				addConnToClientHelloInfo(c, localAddr, remoteAddr)
 			}
@@ -293,41 +297,56 @@ func (h *cryptoSetup) handleTransportParameters(data []byte) error {
 }
 
 // must be called after receiving the transport parameters
-func (h *cryptoSetup) marshalDataForSessionState() []byte {
+func (h *cryptoSetup) marshalDataForSessionState(earlyData bool) []byte {
 	b := make([]byte, 0, 256)
 	b = quicvarint.Append(b, clientSessionStateRevision)
 	b = quicvarint.Append(b, uint64(h.rttStats.SmoothedRTT().Microseconds()))
-	return h.peerParams.MarshalForSessionTicket(b)
+	if earlyData {
+		// only save the transport parameters for 0-RTT enabled session tickets
+		return h.peerParams.MarshalForSessionTicket(b)
+	}
+	return b
 }
 
-func (h *cryptoSetup) handleDataFromSessionState(data []byte) {
-	tp, err := h.handleDataFromSessionStateImpl(data)
+func (h *cryptoSetup) handleDataFromSessionState(data []byte, earlyData bool) (allowEarlyData bool) {
+	rtt, tp, err := decodeDataFromSessionState(data, earlyData)
 	if err != nil {
 		h.logger.Debugf("Restoring of transport parameters from session ticket failed: %s", err.Error())
 		return
 	}
-	h.zeroRTTParameters = tp
+	h.rttStats.SetInitialRTT(rtt)
+	// The session ticket might have been saved from a connection that allowed 0-RTT,
+	// and therefore contain transport parameters.
+	// Only use them if 0-RTT is actually used on the new connection.
+	if tp != nil && h.allow0RTT {
+		h.zeroRTTParameters = tp
+		return true
+	}
+	return false
 }
 
-func (h *cryptoSetup) handleDataFromSessionStateImpl(data []byte) (*wire.TransportParameters, error) {
+func decodeDataFromSessionState(data []byte, earlyData bool) (time.Duration, *wire.TransportParameters, error) {
 	r := bytes.NewReader(data)
 	ver, err := quicvarint.Read(r)
 	if err != nil {
-		return nil, err
+		return 0, nil, err
 	}
 	if ver != clientSessionStateRevision {
-		return nil, fmt.Errorf("mismatching version. Got %d, expected %d", ver, clientSessionStateRevision)
+		return 0, nil, fmt.Errorf("mismatching version. Got %d, expected %d", ver, clientSessionStateRevision)
 	}
-	rtt, err := quicvarint.Read(r)
+	rttEncoded, err := quicvarint.Read(r)
 	if err != nil {
-		return nil, err
+		return 0, nil, err
 	}
-	h.rttStats.SetInitialRTT(time.Duration(rtt) * time.Microsecond)
+	rtt := time.Duration(rttEncoded) * time.Microsecond
+	if !earlyData {
+		return rtt, nil, nil
+	}
 	var tp wire.TransportParameters
 	if err := tp.UnmarshalFromSessionTicket(r); err != nil {
-		return nil, err
+		return 0, nil, err
 	}
-	return &tp, nil
+	return rtt, &tp, nil
 }
 
 func (h *cryptoSetup) getDataForSessionTicket() []byte {
@@ -367,7 +386,9 @@ func (h *cryptoSetup) GetSessionTicket() ([]byte, error) {
 }
 
 // handleSessionTicket is called for the server when receiving the client's session ticket.
-// It reads parameters from the session ticket and decides whether to accept 0-RTT when the session ticket is used for 0-RTT.
+// It reads parameters from the session ticket and checks whether to accept 0-RTT if the session ticket enabled 0-RTT.
+// Note that the fact that the session ticket allows 0-RTT doesn't mean that the actual TLS handshake enables 0-RTT:
+// A client may use a 0-RTT enabled session to resume a TLS session without using 0-RTT.
 func (h *cryptoSetup) handleSessionTicket(sessionTicketData []byte, using0RTT bool) bool {
 	var t sessionTicket
 	if err := t.Unmarshal(sessionTicketData, using0RTT); err != nil {
