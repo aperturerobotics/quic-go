@@ -141,6 +141,8 @@ func main() {
 	flag.Var(&bs, "bind", "bind to")
 	www := flag.String("www", "", "www data")
 	tcp := flag.Bool("tcp", false, "also listen on TCP")
+	key := flag.String("key", "", "TLS key (requires -cert option)")
+	cert := flag.String("cert", "", "TLS certificate (requires -key option)")
 	flag.Parse()
 
 	logger := utils.NewDefaultLogger(nil)
@@ -161,12 +163,18 @@ func main() {
 
 	var wg sync.WaitGroup
 	wg.Add(len(bs))
+	var certFile, keyFile string
+	if *key != "" && *cert != "" {
+		keyFile = *key
+		certFile = *cert
+	} else {
+		certFile, keyFile = testdata.GetCertificatePaths()
+	}
 	for _, b := range bs {
 		bCap := b
 		go func() {
 			var err error
 			if *tcp {
-				certFile, keyFile := testdata.GetCertificatePaths()
 				err = http3.ListenAndServe(bCap, certFile, keyFile, handler)
 			} else {
 				server := http3.Server{
@@ -174,7 +182,7 @@ func main() {
 					Addr:       bCap,
 					QuicConfig: quicConf,
 				}
-				err = server.ListenAndServeTLS(testdata.GetCertificatePaths())
+				err = server.ListenAndServeTLS(certFile, keyFile)
 			}
 			if err != nil {
 				fmt.Println(err)

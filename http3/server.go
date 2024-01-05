@@ -211,6 +211,11 @@ type Server struct {
 	// In that case, the stream type will not be set.
 	UniStreamHijacker func(StreamType, quic.Connection, quic.ReceiveStream, error) (hijacked bool)
 
+	// ConnContext optionally specifies a function that modifies
+	// the context used for a new connection c. The provided ctx
+	// has a ServerContextKey value.
+	ConnContext func(ctx context.Context, c quic.Connection) context.Context
+
 	mutex     sync.RWMutex
 	listeners map[*QUICEarlyListener]listenerInfo
 
@@ -610,6 +615,12 @@ func (s *Server) handleRequest(conn quic.Connection, str quic.Stream, decoder *q
 	ctx = context.WithValue(ctx, ServerContextKey, s)
 	ctx = context.WithValue(ctx, http.LocalAddrContextKey, conn.LocalAddr())
 	ctx = context.WithValue(ctx, RemoteAddrContextKey, conn.RemoteAddr())
+	if s.ConnContext != nil {
+		ctx = s.ConnContext(ctx, conn)
+		if ctx == nil {
+			panic("http3: ConnContext returned nil")
+		}
+	}
 	req = req.WithContext(ctx)
 	r := newResponseWriter(str, conn, s.logger)
 	if req.Method == http.MethodHead {
@@ -723,7 +734,7 @@ func ListenAndServeQUIC(addr, certFile, keyFile string, handler http.Handler) er
 	return server.ListenAndServeTLS(certFile, keyFile)
 }
 
-// ListenAndServe listens on the given network address for both, TLS and QUIC
+// ListenAndServe listens on the given network address for both TLS/TCP and QUIC
 // connections in parallel. It returns if one of the two returns an error.
 // http.DefaultServeMux is used when handler is nil.
 // The correct Alt-Svc headers for QUIC are set.
@@ -765,8 +776,8 @@ func ListenAndServe(addr, certFile, keyFile string, handler http.Handler) error 
 		Handler:   handler,
 	}
 
-	hErr := make(chan error)
-	qErr := make(chan error)
+	hErr := make(chan error, 1)
+	qErr := make(chan error, 1)
 	go func() {
 		hErr <- http.ListenAndServeTLS(addr, certFile, keyFile, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			quicServer.SetQuicHeaders(w.Header())
