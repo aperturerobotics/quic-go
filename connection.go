@@ -235,6 +235,7 @@ var newConnection = func(
 	s := &connection{
 		conn:                conn,
 		config:              conf,
+		disableIdleTimeout:  conf.DisableIdleTimeout,
 		handshakeDestConnID: destConnID,
 		srcConnIDLen:        srcConnID.Len(),
 		tokenGenerator:      tokenGenerator,
@@ -341,6 +342,7 @@ var newClientConnection = func(
 	s := &connection{
 		conn:                conn,
 		config:              conf,
+		disableIdleTimeout:  conf.DisableIdleTimeout,
 		origDestConnID:      destConnID,
 		handshakeDestConnID: destConnID,
 		srcConnIDLen:        srcConnID.Len(),
