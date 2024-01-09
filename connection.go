@@ -689,7 +689,7 @@ func (s *connection) maybeResetTimer() {
 	} else {
 		if keepAliveTime := s.nextKeepAliveTime(); !keepAliveTime.IsZero() {
 			deadline = keepAliveTime
-		} else if !s.disableIdleTimeout {
+		} else {
 			deadline = s.nextIdleTimeoutTime()
 		}
 	}
