@@ -187,7 +187,6 @@ func (h *packetHandlerMap) ReplaceWithClosed(ids []protocol.ConnectionID, pers p
 	// go h.Remove(id)
 	go func() {
 		h.mutex.Lock()
-		handler.shutdown()
 		for _, id := range ids {
 			delete(h.handlers, id)
 		}

@@ -1444,13 +1444,6 @@ func (s *connection) closeRemote(e error) {
 	})
 }
 
-// Close the connection. It sends a NO_ERROR application error.
-// It waits until the run loop has stopped before returning
-func (s *connection) shutdown() {
-	s.closeLocal(nil)
-	<-s.ctx.Done()
-}
-
 func (s *connection) CloseWithError(code ApplicationErrorCode, desc string) error {
 	s.closeLocal(&qerr.ApplicationError{
 		ErrorCode:    code,
@@ -1462,7 +1455,13 @@ func (s *connection) CloseWithError(code ApplicationErrorCode, desc string) erro
 
 // CloseNoError closes the session without sending an error.
 func (s *connection) CloseNoError() {
-	s.shutdown()
+	s.closeLocal(nil)
+	<-s.ctx.Done()
+}
+
+func (s *connection) closeWithTransportError(code TransportErrorCode) {
+	s.closeLocal(&qerr.TransportError{ErrorCode: code})
+	<-s.ctx.Done()
 }
 
 func (s *connection) handleCloseError(closeErr *closeError) {

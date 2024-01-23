@@ -18,7 +18,6 @@ import (
 	"github.com/quic-go/quic-go"
 	"github.com/quic-go/quic-go/http3"
 	"github.com/quic-go/quic-go/internal/testdata"
-	"github.com/quic-go/quic-go/internal/utils"
 )
 
 type binds []string
@@ -116,9 +115,7 @@ func setupHandler(www string) http.Handler {
 					err = errors.New("couldn't get uploaded file size")
 				}
 			}
-			if err != nil {
-				utils.NewDefaultLogger(nil).Infof("Error receiving upload: %#v", err)
-			}
+			log.Printf("Error receiving upload: %#v", err)
 		}
 		io.WriteString(w, `<html><body><form action="/demo/upload" method="post" enctype="multipart/form-data">
 				<input type="file" name="uploadfile"><br>
@@ -136,7 +133,6 @@ func main() {
 	}()
 	// runtime.SetBlockProfileRate(1)
 
-	verbose := flag.Bool("v", false, "verbose")
 	bs := binds{}
 	flag.Var(&bs, "bind", "bind to")
 	www := flag.String("www", "", "www data")
@@ -145,21 +141,11 @@ func main() {
 	cert := flag.String("cert", "", "TLS certificate (requires -key option)")
 	flag.Parse()
 
-	logger := utils.NewDefaultLogger(nil)
-
-	if *verbose {
-		logger.SetLogLevel(utils.LogLevelDebug)
-	} else {
-		logger.SetLogLevel(utils.LogLevelInfo)
-	}
-	logger.SetLogTimeFormat("")
-
 	if len(bs) == 0 {
 		bs = binds{"localhost:6121"}
 	}
 
 	handler := setupHandler(*www)
-	quicConf := &quic.Config{}
 
 	var wg sync.WaitGroup
 	wg.Add(len(bs))
@@ -171,6 +157,7 @@ func main() {
 		certFile, keyFile = testdata.GetCertificatePaths()
 	}
 	for _, b := range bs {
+		fmt.Println("listening on", b)
 		bCap := b
 		go func() {
 			var err error
@@ -180,7 +167,7 @@ func main() {
 				server := http3.Server{
 					Handler:    handler,
 					Addr:       bCap,
-					QuicConfig: quicConf,
+					QuicConfig: &quic.Config{},
 				}
 				err = server.ListenAndServeTLS(certFile, keyFile)
 			}
