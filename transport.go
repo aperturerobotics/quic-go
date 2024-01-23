@@ -247,7 +247,6 @@ func (t *Transport) init(allowZeroLengthConnIDs bool) error {
 			t.connIDGenerator = &protocol.DefaultConnectionIDGenerator{ConnLen: t.connIDLen}
 		}
 
-		getMultiplexer().AddConn(t.Conn)
 		go t.listen(conn)
 		go t.runSendQueue()
 	})
@@ -341,7 +340,6 @@ var setBufferWarningOnce sync.Once
 
 func (t *Transport) listen(conn rawConn) {
 	defer close(t.listening)
-	defer getMultiplexer().RemoveConn(t.Conn)
 
 	for {
 		p, err := conn.ReadPacket()
