@@ -119,6 +119,12 @@ func (c *QUICConnAcceptUniStreamCall) DoAndReturn(f func(context.Context) (Recei
 	return c
 }
 
+// CloseNoError mocks base method.
+func (m *MockQUICConn) CloseNoError() {
+	m.ctrl.T.Helper()
+	_ = m.ctrl.Call(m, "CloseNoError")
+}
+
 // CloseWithError mocks base method.
 func (m *MockQUICConn) CloseWithError(arg0 qerr.ApplicationErrorCode, arg1 string) error {
 	m.ctrl.T.Helper()

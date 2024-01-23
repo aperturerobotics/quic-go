@@ -119,6 +119,12 @@ func (c *EarlyConnectionAcceptUniStreamCall) DoAndReturn(f func(context.Context)
 	return c
 }
 
+// CloseNoError mocks base method.
+func (m *MockEarlyConnection) CloseNoError() {
+	m.ctrl.T.Helper()
+	_ = m.ctrl.Call(m, "CloseNoError")
+}
+
 // CloseWithError mocks base method.
 func (m *MockEarlyConnection) CloseWithError(arg0 qerr.ApplicationErrorCode, arg1 string) error {
 	m.ctrl.T.Helper()

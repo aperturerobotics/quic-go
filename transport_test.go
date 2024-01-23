@@ -310,21 +310,6 @@ var _ = Describe("Transport", func() {
 		Expect(tr.Close()).To(Succeed())
 	})
 
-	It("doesn't add the PacketConn to the multiplexer if (*Transport).init fails", func() {
-		packetChan := make(chan packetToRead)
-		pconn := newMockPacketConn(packetChan)
-		syscallconn := &mockSyscallConn{pconn}
-
-		tr := &Transport{
-			Conn: syscallconn,
-		}
-
-		err := tr.init(false)
-		Expect(err).To(HaveOccurred())
-		conns := getMultiplexer().(*connMultiplexer).conns
-		Expect(len(conns)).To(BeZero())
-	})
-
 	It("allows receiving non-QUIC packets", func() {
 		remoteAddr := &net.UDPAddr{IP: net.IPv4(9, 8, 7, 6), Port: 1234}
 		packetChan := make(chan packetToRead)

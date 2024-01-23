@@ -1572,6 +1572,11 @@ func (s *connection) closeRemote(e error) {
 	})
 }
 
+func (s *connection) CloseNoError() {
+	s.closeLocal(nil)
+	<-s.ctx.Done()
+}
+
 func (s *connection) CloseWithError(code ApplicationErrorCode, desc string) error {
 	s.closeLocal(&qerr.ApplicationError{
 		ErrorCode:    code,

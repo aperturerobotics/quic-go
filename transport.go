@@ -14,6 +14,7 @@ import (
 	"github.com/quic-go/quic-go/internal/utils"
 	"github.com/quic-go/quic-go/internal/wire"
 	"github.com/quic-go/quic-go/logging"
+	"github.com/sirupsen/logrus"
 )
 
 var errListenerAlreadySet = errors.New("listener already set")
@@ -79,6 +80,9 @@ type Transport struct {
 
 	// A Tracer traces events that don't belong to a single QUIC connection.
 	Tracer *logging.Tracer
+
+	// Logger is used to log debug messages.
+	Logger *logrus.Entry
 
 	handlerMap packetHandlerManager
 
@@ -209,7 +213,13 @@ func (t *Transport) init(allowZeroLengthConnIDs bool) error {
 			}
 		}
 
-		t.logger = utils.DefaultLogger // TODO: make this configurable
+		if t.Logger != nil {
+			t.logger = utils.NewLogger(t.Logger)
+		} else if t.server != nil && t.server.logger != nil {
+			t.logger = t.server.logger
+		} else {
+			t.logger = utils.DefaultLogger
+		}
 		t.conn = conn
 		t.handlerMap = newPacketHandlerMap(t.StatelessResetKey, t.enqueueClosePacket, t.logger)
 		t.listening = make(chan struct{})
@@ -237,7 +247,6 @@ func (t *Transport) init(allowZeroLengthConnIDs bool) error {
 			t.connIDGenerator = &protocol.DefaultConnectionIDGenerator{ConnLen: t.connIDLen}
 		}
 
-		getMultiplexer().AddConn(t.Conn)
 		go t.listen(conn)
 		go t.runSendQueue()
 	})
@@ -331,7 +340,6 @@ var setBufferWarningOnce sync.Once
 
 func (t *Transport) listen(conn rawConn) {
 	defer close(t.listening)
-	defer getMultiplexer().RemoveConn(t.Conn)
 
 	for {
 		p, err := conn.ReadPacket()
