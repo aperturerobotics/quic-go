@@ -119,6 +119,42 @@ func (c *MockQUICConnAcceptUniStreamCall) DoAndReturn(f func(context.Context) (R
 	return c
 }
 
+// CloseNoError mocks base method.
+func (m *MockQUICConn) CloseNoError() {
+	m.ctrl.T.Helper()
+	m.ctrl.Call(m, "CloseNoError")
+}
+
+// CloseNoError indicates an expected call of CloseNoError.
+func (mr *MockQUICConnMockRecorder) CloseNoError() *QUICConnCloseNoErrorCall {
+	mr.mock.ctrl.T.Helper()
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "CloseNoError", reflect.TypeOf((*MockQUICConn)(nil).CloseNoError))
+	return &QUICConnCloseNoErrorCall{Call: call}
+}
+
+// QUICConnCloseNoErrorCall wrap *gomock.Call
+type QUICConnCloseNoErrorCall struct {
+	*gomock.Call
+}
+
+// Return rewrite *gomock.Call.Return
+func (c *QUICConnCloseNoErrorCall) Return() *QUICConnCloseNoErrorCall {
+	c.Call = c.Call.Return()
+	return c
+}
+
+// Do rewrite *gomock.Call.Do
+func (c *QUICConnCloseNoErrorCall) Do(f func()) *QUICConnCloseNoErrorCall {
+	c.Call = c.Call.Do(f)
+	return c
+}
+
+// DoAndReturn rewrite *gomock.Call.DoAndReturn
+func (c *QUICConnCloseNoErrorCall) DoAndReturn(f func()) *QUICConnCloseNoErrorCall {
+	c.Call = c.Call.DoAndReturn(f)
+	return c
+}
+
 // CloseWithError mocks base method.
 func (m *MockQUICConn) CloseWithError(arg0 qerr.ApplicationErrorCode, arg1 string) error {
 	m.ctrl.T.Helper()

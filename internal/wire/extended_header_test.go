@@ -1,12 +1,7 @@
 package wire
 
 import (
-	"bytes"
-	"log"
-	"os"
-
 	"github.com/quic-go/quic-go/internal/protocol"
-	"github.com/quic-go/quic-go/internal/utils"
 	"github.com/quic-go/quic-go/quicvarint"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -251,83 +246,6 @@ var _ = Describe("Header", func() {
 			b, err := h.Append(nil, protocol.Version1)
 			Expect(err).ToNot(HaveOccurred())
 			Expect(b).To(HaveLen(expectedLen))
-		})
-	})
-
-	Context("Logging", func() {
-		var (
-			buf    *bytes.Buffer
-			logger utils.Logger
-		)
-
-		BeforeEach(func() {
-			buf = &bytes.Buffer{}
-			logger = utils.DefaultLogger
-			logger.SetLogLevel(utils.LogLevelDebug)
-			log.SetOutput(buf)
-		})
-
-		AfterEach(func() {
-			log.SetOutput(os.Stdout)
-		})
-
-		It("logs Long Headers", func() {
-			(&ExtendedHeader{
-				Header: Header{
-					DestConnectionID: protocol.ParseConnectionID([]byte{0xde, 0xad, 0xbe, 0xef, 0xca, 0xfe, 0x13, 0x37}),
-					SrcConnectionID:  protocol.ParseConnectionID([]byte{0xde, 0xca, 0xfb, 0xad, 0x013, 0x37, 0x13, 0x37}),
-					Type:             protocol.PacketTypeHandshake,
-					Length:           54321,
-					Version:          0xfeed,
-				},
-				PacketNumber:    1337,
-				PacketNumberLen: protocol.PacketNumberLen2,
-			}).Log(logger)
-			Expect(buf.String()).To(ContainSubstring("Long Header{Type: Handshake, DestConnectionID: deadbeefcafe1337, SrcConnectionID: decafbad13371337, PacketNumber: 1337, PacketNumberLen: 2, Length: 54321, Version: 0xfeed}"))
-		})
-
-		It("logs Initial Packets with a Token", func() {
-			(&ExtendedHeader{
-				Header: Header{
-					DestConnectionID: protocol.ParseConnectionID([]byte{0xca, 0xfe, 0x13, 0x37}),
-					SrcConnectionID:  protocol.ParseConnectionID([]byte{0xde, 0xca, 0xfb, 0xad}),
-					Type:             protocol.PacketTypeInitial,
-					Token:            []byte{0xde, 0xad, 0xbe, 0xef},
-					Length:           100,
-					Version:          0xfeed,
-				},
-				PacketNumber:    42,
-				PacketNumberLen: protocol.PacketNumberLen2,
-			}).Log(logger)
-			Expect(buf.String()).To(ContainSubstring("Long Header{Type: Initial, DestConnectionID: cafe1337, SrcConnectionID: decafbad, Token: 0xdeadbeef, PacketNumber: 42, PacketNumberLen: 2, Length: 100, Version: 0xfeed}"))
-		})
-
-		It("logs Initial packets without a Token", func() {
-			(&ExtendedHeader{
-				Header: Header{
-					DestConnectionID: protocol.ParseConnectionID([]byte{0xca, 0xfe, 0x13, 0x37}),
-					SrcConnectionID:  protocol.ParseConnectionID([]byte{0xde, 0xca, 0xfb, 0xad}),
-					Type:             protocol.PacketTypeInitial,
-					Length:           100,
-					Version:          0xfeed,
-				},
-				PacketNumber:    42,
-				PacketNumberLen: protocol.PacketNumberLen2,
-			}).Log(logger)
-			Expect(buf.String()).To(ContainSubstring("Long Header{Type: Initial, DestConnectionID: cafe1337, SrcConnectionID: decafbad, Token: (empty), PacketNumber: 42, PacketNumberLen: 2, Length: 100, Version: 0xfeed}"))
-		})
-
-		It("logs Retry packets with a Token", func() {
-			(&ExtendedHeader{
-				Header: Header{
-					DestConnectionID: protocol.ParseConnectionID([]byte{0xca, 0xfe, 0x13, 0x37}),
-					SrcConnectionID:  protocol.ParseConnectionID([]byte{0xde, 0xca, 0xfb, 0xad}),
-					Type:             protocol.PacketTypeRetry,
-					Token:            []byte{0x12, 0x34, 0x56},
-					Version:          0xfeed,
-				},
-			}).Log(logger)
-			Expect(buf.String()).To(ContainSubstring("Long Header{Type: Retry, DestConnectionID: cafe1337, SrcConnectionID: decafbad, Token: 0x123456, Version: 0xfeed}"))
 		})
 	})
 })

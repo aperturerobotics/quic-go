@@ -2,11 +2,14 @@ module github.com/quic-go/quic-go
 
 go 1.21
 
+replace github.com/sirupsen/logrus => github.com/aperturerobotics/logrus v1.9.4-0.20240119050608-13332fb58195 // aperture
+
 require (
 	github.com/francoispqt/gojay v1.2.13
 	github.com/onsi/ginkgo/v2 v2.9.5
 	github.com/onsi/gomega v1.27.6
 	github.com/quic-go/qpack v0.4.0
+	github.com/sirupsen/logrus v1.9.3
 	go.uber.org/mock v0.4.0
 	golang.org/x/crypto v0.4.0
 	golang.org/x/exp v0.0.0-20221205204356-47842c84f3db

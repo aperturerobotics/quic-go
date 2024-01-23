@@ -120,6 +120,42 @@ func (c *MockEarlyConnectionAcceptUniStreamCall) DoAndReturn(f func(context.Cont
 	return c
 }
 
+// CloseNoError mocks base method.
+func (m *MockEarlyConnection) CloseNoError() {
+	m.ctrl.T.Helper()
+	m.ctrl.Call(m, "CloseNoError")
+}
+
+// CloseNoError indicates an expected call of CloseNoError.
+func (mr *MockEarlyConnectionMockRecorder) CloseNoError() *EarlyConnectionCloseNoErrorCall {
+	mr.mock.ctrl.T.Helper()
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "CloseNoError", reflect.TypeOf((*MockEarlyConnection)(nil).CloseNoError))
+	return &EarlyConnectionCloseNoErrorCall{Call: call}
+}
+
+// EarlyConnectionCloseNoErrorCall wrap *gomock.Call
+type EarlyConnectionCloseNoErrorCall struct {
+	*gomock.Call
+}
+
+// Return rewrite *gomock.Call.Return
+func (c *EarlyConnectionCloseNoErrorCall) Return() *EarlyConnectionCloseNoErrorCall {
+	c.Call = c.Call.Return()
+	return c
+}
+
+// Do rewrite *gomock.Call.Do
+func (c *EarlyConnectionCloseNoErrorCall) Do(f func()) *EarlyConnectionCloseNoErrorCall {
+	c.Call = c.Call.Do(f)
+	return c
+}
+
+// DoAndReturn rewrite *gomock.Call.DoAndReturn
+func (c *EarlyConnectionCloseNoErrorCall) DoAndReturn(f func()) *EarlyConnectionCloseNoErrorCall {
+	c.Call = c.Call.DoAndReturn(f)
+	return c
+}
+
 // CloseWithError mocks base method.
 func (m *MockEarlyConnection) CloseWithError(arg0 qerr.ApplicationErrorCode, arg1 string) error {
 	m.ctrl.T.Helper()

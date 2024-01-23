@@ -11,6 +11,7 @@ import (
 	"github.com/quic-go/quic-go/internal/handshake"
 	"github.com/quic-go/quic-go/internal/protocol"
 	"github.com/quic-go/quic-go/logging"
+	"github.com/sirupsen/logrus"
 )
 
 // The StreamID is the ID of a QUIC stream.
@@ -188,6 +189,8 @@ type Connection interface {
 	LocalAddr() net.Addr
 	// RemoteAddr returns the address of the peer.
 	RemoteAddr() net.Addr
+	// CloseNoError closes the connection with no error.
+	CloseNoError()
 	// CloseWithError closes the connection with an error.
 	// The error string will be sent to the peer.
 	CloseWithError(ApplicationErrorCode, string) error
@@ -336,6 +339,8 @@ type Config struct {
 	// Enable QUIC datagram support (RFC 9221).
 	EnableDatagrams bool
 	Tracer          func(context.Context, logging.Perspective, ConnectionID) *logging.ConnectionTracer
+	// Logger is the logger to use.
+	Logger *logrus.Entry
 }
 
 // ClientHelloInfo contains information about an incoming connection attempt.

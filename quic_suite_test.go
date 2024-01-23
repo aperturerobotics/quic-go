@@ -6,7 +6,6 @@ import (
 	"log"
 	"runtime/pprof"
 	"strings"
-	"sync"
 	"testing"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -23,9 +22,6 @@ var mockCtrl *gomock.Controller
 
 var _ = BeforeEach(func() {
 	mockCtrl = gomock.NewController(GinkgoT())
-
-	// reset the sync.Once
-	connMuxerOnce = *new(sync.Once)
 })
 
 var _ = BeforeSuite(func() {
