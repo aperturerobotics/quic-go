@@ -268,7 +268,7 @@ func newServer(
 		retryQueue:                  make(chan rejectedPacket, 8),
 		newConn:                     newConnection,
 		tracer:                      tracer,
-		logger:                      utils.DefaultLogger.WithPrefix("server"),
+		logger:                      utils.NewLogger(config.Logger).WithPrefix("server"),
 		acceptEarlyConns:            acceptEarly,
 		disableVersionNegotiation:   disableVersionNegotiation,
 		onClose:                     onClose,

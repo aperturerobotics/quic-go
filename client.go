@@ -171,6 +171,10 @@ func newClient(sendConn sendConn, connIDGenerator ConnectionIDGenerator, config 
 	if err != nil {
 		return nil, err
 	}
+	logger := utils.DefaultLogger
+	if config.Logger != nil {
+		logger = utils.NewLogger(config.Logger)
+	}
 	c := &client{
 		connIDGenerator: connIDGenerator,
 		srcConnID:       srcConnID,
@@ -182,13 +186,13 @@ func newClient(sendConn sendConn, connIDGenerator ConnectionIDGenerator, config 
 		config:          config,
 		version:         config.Versions[0],
 		handshakeChan:   make(chan struct{}),
-		logger:          utils.DefaultLogger.WithPrefix("client"),
+		logger:          logger,
 	}
 	return c, nil
 }
 
 func (c *client) dial(ctx context.Context) error {
-	c.logger.Infof("Starting new connection to %s (%s -> %s), source connection ID %s, destination connection ID %s, version %s", c.tlsConf.ServerName, c.sendConn.LocalAddr(), c.sendConn.RemoteAddr(), c.srcConnID, c.destConnID, c.version)
+	c.logger.Debugf("Starting new connection to %s (%s -> %s), source connection ID %s, destination connection ID %s, version %s", c.tlsConf.ServerName, c.sendConn.LocalAddr(), c.sendConn.RemoteAddr(), c.srcConnID, c.destConnID, c.version)
 
 	c.conn = newClientConnection(
 		c.sendConn,

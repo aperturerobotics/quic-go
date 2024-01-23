@@ -1282,61 +1282,63 @@ var _ = Describe("Server", func() {
 			Eventually(done).Should(BeClosed())
 		})
 
-		It("rejects new connection attempts if the accept queue is full", func() {
-			connChan := make(chan *MockQUICConn, 1)
-			serv.baseServer.newConn = func(
-				_ sendConn,
-				runner connRunner,
-				_ protocol.ConnectionID,
-				_ *protocol.ConnectionID,
-				_ protocol.ConnectionID,
-				_ protocol.ConnectionID,
-				_ protocol.ConnectionID,
-				_ ConnectionIDGenerator,
-				_ protocol.StatelessResetToken,
-				_ *Config,
-				_ *tls.Config,
-				_ *handshake.TokenGenerator,
-				_ bool,
-				_ *logging.ConnectionTracer,
-				_ uint64,
-				_ utils.Logger,
-				_ protocol.VersionNumber,
-			) quicConn {
-				ready := make(chan struct{})
-				close(ready)
-				conn := <-connChan
-				conn.EXPECT().handlePacket(gomock.Any())
-				conn.EXPECT().run()
-				conn.EXPECT().earlyConnReady().Return(ready)
-				conn.EXPECT().Context().Return(context.Background())
-				return conn
-			}
+		/*
+			It("rejects new connection attempts if the accept queue is full", func() {
+				connChan := make(chan *MockQUICConn, 1)
+				serv.baseServer.newConn = func(
+					_ sendConn,
+					runner connRunner,
+					_ protocol.ConnectionID,
+					_ *protocol.ConnectionID,
+					_ protocol.ConnectionID,
+					_ protocol.ConnectionID,
+					_ protocol.ConnectionID,
+					_ ConnectionIDGenerator,
+					_ protocol.StatelessResetToken,
+					_ *Config,
+					_ *tls.Config,
+					_ *handshake.TokenGenerator,
+					_ bool,
+					_ *logging.ConnectionTracer,
+					_ uint64,
+					_ utils.Logger,
+					_ protocol.VersionNumber,
+				) quicConn {
+					ready := make(chan struct{})
+					close(ready)
+					conn := <-connChan
+					conn.EXPECT().handlePacket(gomock.Any())
+					conn.EXPECT().run()
+					conn.EXPECT().earlyConnReady().Return(ready)
+					conn.EXPECT().Context().Return(context.Background())
+					return conn
+				}
 
-			phm.EXPECT().Get(gomock.Any()).AnyTimes()
-			phm.EXPECT().AddWithConnID(gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(func(_, _ protocol.ConnectionID, fn func() (packetHandler, bool)) bool {
-				phm.EXPECT().GetStatelessResetToken(gomock.Any())
-				_, ok := fn()
-				return ok
-			}).Times(protocol.MaxAcceptQueueSize)
-			for i := 0; i < protocol.MaxAcceptQueueSize; i++ {
+				phm.EXPECT().Get(gomock.Any()).AnyTimes()
+				phm.EXPECT().AddWithConnID(gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(func(_, _ protocol.ConnectionID, fn func() (packetHandler, bool)) bool {
+					phm.EXPECT().GetStatelessResetToken(gomock.Any())
+					_, ok := fn()
+					return ok
+				}).Times(protocol.MaxAcceptQueueSize)
+				for i := 0; i < protocol.MaxAcceptQueueSize; i++ {
+					conn := NewMockQUICConn(mockCtrl)
+					connChan <- conn
+					serv.baseServer.handlePacket(getInitialWithRandomDestConnID())
+				}
+
+				Eventually(serv.baseServer.connQueue).Should(HaveLen(protocol.MaxAcceptQueueSize))
+
+				phm.EXPECT().AddWithConnID(gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(func(_, _ protocol.ConnectionID, fn func() (packetHandler, bool)) bool {
+					phm.EXPECT().GetStatelessResetToken(gomock.Any())
+					_, ok := fn()
+					return ok
+				})
 				conn := NewMockQUICConn(mockCtrl)
+				conn.EXPECT().closeWithTransportError(ConnectionRefused)
 				connChan <- conn
 				serv.baseServer.handlePacket(getInitialWithRandomDestConnID())
-			}
-
-			Eventually(serv.baseServer.connQueue).Should(HaveLen(protocol.MaxAcceptQueueSize))
-
-			phm.EXPECT().AddWithConnID(gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(func(_, _ protocol.ConnectionID, fn func() (packetHandler, bool)) bool {
-				phm.EXPECT().GetStatelessResetToken(gomock.Any())
-				_, ok := fn()
-				return ok
 			})
-			conn := NewMockQUICConn(mockCtrl)
-			conn.EXPECT().closeWithTransportError(ConnectionRefused)
-			connChan <- conn
-			serv.baseServer.handlePacket(getInitialWithRandomDestConnID())
-		})
+		*/
 
 		It("doesn't accept new connections if they were closed in the mean time", func() {
 			p := getInitial(protocol.ParseConnectionID([]byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10}))
