@@ -346,12 +346,21 @@ func (t *Transport) Close() error {
 }
 
 func (t *Transport) closeServer() {
-	t.mutex.Lock()
-	t.server = nil
-	if t.isSingleUse {
-		t.closed = true
+	closeLocked := func(lock bool) {
+		if lock {
+			t.mutex.Lock()
+		}
+		t.server = nil
+		if t.isSingleUse {
+			t.closed = true
+		}
+		t.mutex.Unlock()
 	}
-	t.mutex.Unlock()
+	if t.mutex.TryLock() {
+		closeLocked(false)
+	} else {
+		go closeLocked(true)
+	}
 	if t.createdConn {
 		t.Conn.Close()
 	}
