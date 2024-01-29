@@ -652,7 +652,7 @@ runLoop:
 			s.tracer.Close()
 		}
 	}
-	s.logger.Infof("Connection %s closed.", s.logID)
+	s.logger.Debugf("Connection %s closed.", s.logID)
 	s.timer.Stop()
 	return closeErr.err
 }
@@ -1119,7 +1119,7 @@ func (s *connection) handleVersionNegotiationPacket(p receivedPacket) {
 		}
 	}
 
-	s.logger.Infof("Received a Version Negotiation packet. Supported Versions: %s", supportedVersions)
+	s.logger.Debugf("Received a Version Negotiation packet. Supported Versions: %s", supportedVersions)
 	if s.tracer != nil && s.tracer.ReceivedVersionNegotiationPacket != nil {
 		s.tracer.ReceivedVersionNegotiationPacket(dest, src, supportedVersions)
 	}
@@ -1129,14 +1129,14 @@ func (s *connection) handleVersionNegotiationPacket(p receivedPacket) {
 			Ours:   s.config.Versions,
 			Theirs: supportedVersions,
 		})
-		s.logger.Infof("No compatible QUIC version found.")
+		s.logger.Debugf("No compatible QUIC version found.")
 		return
 	}
 	if s.tracer != nil && s.tracer.NegotiatedVersion != nil {
 		s.tracer.NegotiatedVersion(newVersion, s.config.Versions, supportedVersions)
 	}
 
-	s.logger.Infof("Switching to QUIC version %s.", newVersion)
+	s.logger.Debugf("Switching to QUIC version %s.", newVersion)
 	nextPN, _ := s.sentPacketHandler.PeekPacketNumber(protocol.EncryptionInitial)
 	s.destroyImpl(&errCloseForRecreating{
 		nextPacketNumber: nextPN,
@@ -1546,7 +1546,7 @@ func (s *connection) handleDatagramFrame(f *wire.DatagramFrame) error {
 func (s *connection) closeLocal(e error) {
 	s.closeOnce.Do(func() {
 		if e == nil {
-			s.logger.Infof("Closing connection.")
+			s.logger.Debugf("Closing connection.")
 		} else {
 			s.logger.Errorf("Closing connection with error: %s", e)
 		}
@@ -1563,7 +1563,7 @@ func (s *connection) destroy(e error) {
 func (s *connection) destroyImpl(e error) {
 	s.closeOnce.Do(func() {
 		if nerr, ok := e.(net.Error); ok && nerr.Timeout() {
-			s.logger.Errorf("Destroying connection: %s", e)
+			s.logger.Debugf("Destroying connection: %s", e)
 		} else {
 			s.logger.Errorf("Destroying connection with error: %s", e)
 		}
@@ -2321,10 +2321,10 @@ func (s *connection) tryQueueingUndecryptablePacket(p receivedPacket, pt logging
 		if s.tracer != nil && s.tracer.DroppedPacket != nil {
 			s.tracer.DroppedPacket(pt, protocol.InvalidPacketNumber, p.Size(), logging.PacketDropDOSPrevention)
 		}
-		s.logger.Infof("Dropping undecryptable packet (%d bytes). Undecryptable packet queue full.", p.Size())
+		s.logger.Debugf("Dropping undecryptable packet (%d bytes). Undecryptable packet queue full.", p.Size())
 		return
 	}
-	s.logger.Infof("Queueing packet (%d bytes) for later decryption", p.Size())
+	s.logger.Debugf("Queueing packet (%d bytes) for later decryption", p.Size())
 	if s.tracer != nil && s.tracer.BufferedPacket != nil {
 		s.tracer.BufferedPacket(pt, p.Size())
 	}

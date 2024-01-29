@@ -69,7 +69,7 @@ func wrapConn(pc net.PacketConn) (rawConn, error) {
 	}
 	c, ok := pc.(OOBCapablePacketConn)
 	if !ok {
-		utils.DefaultLogger.Infof("PacketConn is not a net.UDPConn. Disabling optimizations possible on UDP connections.")
+		utils.DefaultLogger.Debugf("PacketConn is not a net.UDPConn. Disabling optimizations possible on UDP connections.")
 		return &basicConn{PacketConn: pc, supportsDF: supportsDF}, nil
 	}
 	return newConn(c, supportsDF)
