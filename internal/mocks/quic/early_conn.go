@@ -127,31 +127,31 @@ func (m *MockEarlyConnection) CloseNoError() {
 }
 
 // CloseNoError indicates an expected call of CloseNoError.
-func (mr *MockEarlyConnectionMockRecorder) CloseNoError() *EarlyConnectionCloseNoErrorCall {
+func (mr *MockEarlyConnectionMockRecorder) CloseNoError() *MockEarlyConnectionCloseNoErrorCall {
 	mr.mock.ctrl.T.Helper()
 	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "CloseNoError", reflect.TypeOf((*MockEarlyConnection)(nil).CloseNoError))
-	return &EarlyConnectionCloseNoErrorCall{Call: call}
+	return &MockEarlyConnectionCloseNoErrorCall{Call: call}
 }
 
-// EarlyConnectionCloseNoErrorCall wrap *gomock.Call
-type EarlyConnectionCloseNoErrorCall struct {
+// MockEarlyConnectionCloseNoErrorCall wrap *gomock.Call
+type MockEarlyConnectionCloseNoErrorCall struct {
 	*gomock.Call
 }
 
 // Return rewrite *gomock.Call.Return
-func (c *EarlyConnectionCloseNoErrorCall) Return() *EarlyConnectionCloseNoErrorCall {
+func (c *MockEarlyConnectionCloseNoErrorCall) Return() *MockEarlyConnectionCloseNoErrorCall {
 	c.Call = c.Call.Return()
 	return c
 }
 
 // Do rewrite *gomock.Call.Do
-func (c *EarlyConnectionCloseNoErrorCall) Do(f func()) *EarlyConnectionCloseNoErrorCall {
+func (c *MockEarlyConnectionCloseNoErrorCall) Do(f func()) *MockEarlyConnectionCloseNoErrorCall {
 	c.Call = c.Call.Do(f)
 	return c
 }
 
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
-func (c *EarlyConnectionCloseNoErrorCall) DoAndReturn(f func()) *EarlyConnectionCloseNoErrorCall {
+func (c *MockEarlyConnectionCloseNoErrorCall) DoAndReturn(f func()) *MockEarlyConnectionCloseNoErrorCall {
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }
