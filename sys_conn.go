@@ -24,6 +24,7 @@ var _ OOBCapablePacketConn = &net.UDPConn{}
 
 func wrapConn(pc net.PacketConn) (rawConn, error) {
 	if err := setReceiveBuffer(pc); err != nil {
+		_ = err
 		/*
 			if !strings.Contains(err.Error(), "use of closed network connection") {
 				setBufferWarningOnce.Do(func() {
@@ -36,6 +37,7 @@ func wrapConn(pc net.PacketConn) (rawConn, error) {
 		*/
 	}
 	if err := setSendBuffer(pc); err != nil {
+		_ = err
 		/*
 			if !strings.Contains(err.Error(), "use of closed network connection") {
 				setBufferWarningOnce.Do(func() {
