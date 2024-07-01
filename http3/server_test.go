@@ -90,13 +90,14 @@ var _ = Describe("Server", func() {
 			exampleGetRequest  *http.Request
 			examplePostRequest *http.Request
 		)
-		reqContext := context.Background()
+		reqContext, reqContextCancel := context.WithCancel(context.Background())
 
 		decodeHeader := func(str io.Reader) map[string][]string {
 			fields := make(map[string][]string)
 			decoder := qpack.NewDecoder(nil)
 
-			frame, err := parseNextFrame(str, nil)
+			fp := frameParser{r: str}
+			frame, err := fp.ParseNext()
 			ExpectWithOffset(1, err).ToNot(HaveOccurred())
 			ExpectWithOffset(1, frame).To(BeAssignableToTypeOf(&headersFrame{}))
 			headersFrame := frame.(*headersFrame)
@@ -139,6 +140,7 @@ var _ = Describe("Server", func() {
 
 			qpackDecoder = qpack.NewDecoder(nil)
 			str = mockquic.NewMockStream(mockCtrl)
+			str.EXPECT().Context().Return(reqContext).AnyTimes()
 			str.EXPECT().StreamID().AnyTimes()
 			qconn := mockquic.NewMockEarlyConnection(mockCtrl)
 			addr := &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1), Port: 1337}
@@ -146,7 +148,7 @@ var _ = Describe("Server", func() {
 			qconn.EXPECT().LocalAddr().AnyTimes()
 			qconn.EXPECT().ConnectionState().Return(quic.ConnectionState{}).AnyTimes()
 			qconn.EXPECT().Context().Return(context.Background()).AnyTimes()
-			conn = newConnection(qconn, false, protocol.PerspectiveServer, nil)
+			conn = newConnection(context.Background(), qconn, false, protocol.PerspectiveServer, nil)
 		})
 
 		It("calls the HTTP handler function", func() {
@@ -156,7 +158,6 @@ var _ = Describe("Server", func() {
 			})
 
 			setRequest(encodeRequest(exampleGetRequest))
-			str.EXPECT().Context().Return(reqContext)
 			str.EXPECT().Write(gomock.Any()).DoAndReturn(func(p []byte) (int, error) {
 				return len(p), nil
 			}).AnyTimes()
@@ -168,8 +169,6 @@ var _ = Describe("Server", func() {
 			Eventually(requestChan).Should(Receive(&req))
 			Expect(req.Host).To(Equal("www.example.com"))
 			Expect(req.RemoteAddr).To(Equal("127.0.0.1:1337"))
-			Expect(req.Context().Value(ServerContextKey)).To(Equal(s))
-			Expect(req.Context().Value(testConnContextKey("test"))).To(Equal(conn.Connection))
 		})
 
 		It("returns 200 with an empty handler", func() {
@@ -177,7 +176,6 @@ var _ = Describe("Server", func() {
 
 			responseBuf := &bytes.Buffer{}
 			setRequest(encodeRequest(exampleGetRequest))
-			str.EXPECT().Context().Return(reqContext)
 			str.EXPECT().Write(gomock.Any()).DoAndReturn(responseBuf.Write).AnyTimes()
 			str.EXPECT().CancelRead(gomock.Any())
 			str.EXPECT().Close()
@@ -194,7 +192,6 @@ var _ = Describe("Server", func() {
 
 			responseBuf := &bytes.Buffer{}
 			setRequest(encodeRequest(exampleGetRequest))
-			str.EXPECT().Context().Return(reqContext)
 			str.EXPECT().Write(gomock.Any()).DoAndReturn(responseBuf.Write).AnyTimes()
 			str.EXPECT().CancelRead(gomock.Any())
 			str.EXPECT().Close()
@@ -215,7 +212,6 @@ var _ = Describe("Server", func() {
 
 			responseBuf := &bytes.Buffer{}
 			setRequest(encodeRequest(exampleGetRequest))
-			str.EXPECT().Context().Return(reqContext)
 			str.EXPECT().Write(gomock.Any()).DoAndReturn(responseBuf.Write).AnyTimes()
 			str.EXPECT().CancelRead(gomock.Any())
 			str.EXPECT().Close()
@@ -236,7 +232,6 @@ var _ = Describe("Server", func() {
 
 			responseBuf := &bytes.Buffer{}
 			setRequest(encodeRequest(exampleGetRequest))
-			str.EXPECT().Context().Return(reqContext)
 			str.EXPECT().Write(gomock.Any()).DoAndReturn(responseBuf.Write).AnyTimes()
 			str.EXPECT().CancelRead(gomock.Any())
 			str.EXPECT().Close()
@@ -257,7 +252,6 @@ var _ = Describe("Server", func() {
 			Expect(err).ToNot(HaveOccurred())
 			responseBuf := &bytes.Buffer{}
 			setRequest(encodeRequest(headRequest))
-			str.EXPECT().Context().Return(reqContext)
 			str.EXPECT().Write(gomock.Any()).DoAndReturn(responseBuf.Write).AnyTimes()
 			str.EXPECT().CancelRead(gomock.Any())
 			str.EXPECT().Close()
@@ -277,7 +271,6 @@ var _ = Describe("Server", func() {
 			Expect(err).ToNot(HaveOccurred())
 			responseBuf := &bytes.Buffer{}
 			setRequest(encodeRequest(headRequest))
-			str.EXPECT().Context().Return(reqContext)
 			str.EXPECT().Write(gomock.Any()).DoAndReturn(responseBuf.Write).AnyTimes()
 			str.EXPECT().CancelRead(gomock.Any())
 			str.EXPECT().Close()
@@ -296,7 +289,6 @@ var _ = Describe("Server", func() {
 
 			responseBuf := &bytes.Buffer{}
 			setRequest(encodeRequest(exampleGetRequest))
-			str.EXPECT().Context().Return(reqContext)
 			str.EXPECT().Write(gomock.Any()).DoAndReturn(responseBuf.Write).AnyTimes()
 			str.EXPECT().CancelRead(quic.StreamErrorCode(ErrCodeInternalError))
 			str.EXPECT().CancelWrite(quic.StreamErrorCode(ErrCodeInternalError))
@@ -314,7 +306,6 @@ var _ = Describe("Server", func() {
 
 			responseBuf := &bytes.Buffer{}
 			setRequest(encodeRequest(exampleGetRequest))
-			str.EXPECT().Context().Return(reqContext)
 			str.EXPECT().Write(gomock.Any()).DoAndReturn(responseBuf.Write).AnyTimes()
 			str.EXPECT().CancelRead(quic.StreamErrorCode(ErrCodeInternalError))
 			str.EXPECT().CancelWrite(quic.StreamErrorCode(ErrCodeInternalError))
@@ -354,6 +345,7 @@ var _ = Describe("Server", func() {
 
 				buf := bytes.NewBuffer(quicvarint.Append(nil, 0x41))
 				unknownStr := mockquic.NewMockStream(mockCtrl)
+				unknownStr.EXPECT().Context().Return(context.Background()).AnyTimes()
 				unknownStr.EXPECT().Read(gomock.Any()).DoAndReturn(buf.Read).AnyTimes()
 				unknownStr.EXPECT().StreamID().AnyTimes()
 				conn.EXPECT().AcceptStream(gomock.Any()).Return(unknownStr, nil)
@@ -379,6 +371,7 @@ var _ = Describe("Server", func() {
 
 				buf := bytes.NewBuffer(quicvarint.Append(nil, 0x41))
 				unknownStr := mockquic.NewMockStream(mockCtrl)
+				unknownStr.EXPECT().Context().Return(context.Background()).AnyTimes()
 				unknownStr.EXPECT().StreamID().AnyTimes()
 				unknownStr.EXPECT().Read(gomock.Any()).DoAndReturn(buf.Read).AnyTimes()
 				unknownStr.EXPECT().CancelRead(quic.StreamErrorCode(ErrCodeRequestIncomplete))
@@ -406,6 +399,7 @@ var _ = Describe("Server", func() {
 
 				buf := bytes.NewBuffer(quicvarint.Append(nil, 0x41))
 				unknownStr := mockquic.NewMockStream(mockCtrl)
+				unknownStr.EXPECT().Context().Return(context.Background()).AnyTimes()
 				unknownStr.EXPECT().StreamID().AnyTimes()
 				unknownStr.EXPECT().Read(gomock.Any()).DoAndReturn(buf.Read).AnyTimes()
 				unknownStr.EXPECT().CancelRead(quic.StreamErrorCode(ErrCodeRequestIncomplete))
@@ -427,7 +421,6 @@ var _ = Describe("Server", func() {
 				const strID = protocol.StreamID(1234 * 4)
 				testErr := errors.New("test error")
 				done := make(chan struct{})
-				unknownStr := mockquic.NewMockStream(mockCtrl)
 				s.StreamHijacker = func(ft FrameType, _ quic.ConnectionTracingID, str quic.Stream, err error) (bool, error) {
 					defer close(done)
 					Expect(ft).To(BeZero())
@@ -435,6 +428,8 @@ var _ = Describe("Server", func() {
 					Expect(err).To(MatchError(testErr))
 					return true, nil
 				}
+				unknownStr := mockquic.NewMockStream(mockCtrl)
+				unknownStr.EXPECT().Context().Return(context.Background()).AnyTimes()
 				unknownStr.EXPECT().StreamID().Return(strID).AnyTimes()
 				unknownStr.EXPECT().Read(gomock.Any()).Return(0, testErr).AnyTimes()
 				conn.EXPECT().AcceptStream(gomock.Any()).Return(unknownStr, nil)
@@ -558,6 +553,7 @@ var _ = Describe("Server", func() {
 				conn = mockquic.NewMockEarlyConnection(mockCtrl)
 				controlStr := mockquic.NewMockStream(mockCtrl)
 				controlStr.EXPECT().Write(gomock.Any())
+				conn.EXPECT().Context().Return(context.Background())
 				conn.EXPECT().OpenUniStream().Return(controlStr, nil)
 				conn.EXPECT().AcceptUniStream(gomock.Any()).DoAndReturn(func(context.Context) (quic.ReceiveStream, error) {
 					<-testDone
@@ -585,7 +581,6 @@ var _ = Describe("Server", func() {
 				responseBuf := &bytes.Buffer{}
 				setRequest(append(requestData, b...))
 				done := make(chan struct{})
-				str.EXPECT().Context().Return(reqContext)
 				str.EXPECT().Write(gomock.Any()).DoAndReturn(responseBuf.Write).AnyTimes()
 				str.EXPECT().CancelRead(quic.StreamErrorCode(ErrCodeNoError))
 				str.EXPECT().Close().Do(func() error { close(done); return nil })
@@ -609,7 +604,6 @@ var _ = Describe("Server", func() {
 				b := (&dataFrame{Length: 6}).Append(nil) // add a body
 				b = append(b, []byte("foobar")...)
 				setRequest(append(requestData, b...))
-				str.EXPECT().Context().Return(reqContext)
 				var buf bytes.Buffer
 				str.EXPECT().Write(gomock.Any()).DoAndReturn(buf.Write).AnyTimes()
 
@@ -619,7 +613,8 @@ var _ = Describe("Server", func() {
 				// The buffer is expected to contain:
 				// 1. The response header (in a HEADERS frame)
 				// 2. the "foobar" (unframed)
-				frame, err := parseNextFrame(&buf, nil)
+				fp := frameParser{r: &buf}
+				frame, err := fp.ParseNext()
 				Expect(err).ToNot(HaveOccurred())
 				Expect(frame).To(BeAssignableToTypeOf(&headersFrame{}))
 				df := frame.(*headersFrame)
@@ -724,7 +719,6 @@ var _ = Describe("Server", func() {
 			})
 
 			setRequest(encodeRequest(examplePostRequest))
-			str.EXPECT().Context().Return(reqContext)
 			str.EXPECT().Write(gomock.Any()).DoAndReturn(func(p []byte) (int, error) {
 				return len(p), nil
 			}).AnyTimes()
@@ -739,15 +733,15 @@ var _ = Describe("Server", func() {
 			handlerCalled := make(chan struct{})
 			s.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				defer GinkgoRecover()
-				Expect(r.Context().Done()).To(BeClosed())
+				// The context is canceled via context.AfterFunc,
+				// which performs the cancellation in a new Go routine.
+				Eventually(r.Context().Done()).Should(BeClosed())
 				Expect(r.Context().Err()).To(MatchError(context.Canceled))
 				close(handlerCalled)
 			})
 			setRequest(encodeRequest(examplePostRequest))
 
-			reqContext, cancel := context.WithCancel(context.Background())
-			cancel()
-			str.EXPECT().Context().Return(reqContext)
+			reqContextCancel()
 			str.EXPECT().Write(gomock.Any()).DoAndReturn(func(p []byte) (int, error) {
 				return len(p), nil
 			}).AnyTimes()
@@ -1166,6 +1160,9 @@ var _ = Describe("Server", func() {
 			conn := mockquic.NewMockEarlyConnection(mockCtrl)
 			controlStr := mockquic.NewMockStream(mockCtrl)
 			controlStr.EXPECT().Write(gomock.Any())
+			conn.EXPECT().LocalAddr()
+			conn.EXPECT().RemoteAddr()
+			conn.EXPECT().Context().Return(context.Background())
 			conn.EXPECT().OpenUniStream().Return(controlStr, nil)
 			testDone := make(chan struct{})
 			conn.EXPECT().AcceptUniStream(gomock.Any()).DoAndReturn(func(context.Context) (quic.ReceiveStream, error) {

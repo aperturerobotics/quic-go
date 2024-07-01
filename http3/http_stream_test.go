@@ -2,6 +2,7 @@ package http3
 
 import (
 	"bytes"
+	"context"
 	"io"
 	"math"
 	"net/http"
@@ -42,7 +43,7 @@ var _ = Describe("Stream", func() {
 				errorCbCalled = true
 				return nil
 			}).AnyTimes()
-			str = newStream(qstr, newConnection(conn, false, protocol.PerspectiveClient, nil), nil)
+			str = newStream(qstr, newConnection(context.Background(), conn, false, protocol.PerspectiveClient, nil), nil)
 		})
 
 		It("reads DATA frames in a single run", func() {
@@ -140,7 +141,8 @@ var _ = Describe("Stream", func() {
 			str.Write([]byte("foo"))
 			str.Write([]byte("foobar"))
 
-			f, err := parseNextFrame(buf, nil)
+			fp := frameParser{r: buf}
+			f, err := fp.ParseNext()
 			Expect(err).ToNot(HaveOccurred())
 			Expect(f).To(Equal(&dataFrame{Length: 3}))
 			b := make([]byte, 3)
@@ -148,7 +150,8 @@ var _ = Describe("Stream", func() {
 			Expect(err).ToNot(HaveOccurred())
 			Expect(b).To(Equal([]byte("foo")))
 
-			f, err = parseNextFrame(buf, nil)
+			fp = frameParser{r: buf}
+			f, err = fp.ParseNext()
 			Expect(err).ToNot(HaveOccurred())
 			Expect(f).To(Equal(&dataFrame{Length: 6}))
 			b = make([]byte, 6)
@@ -168,7 +171,7 @@ var _ = Describe("Request Stream", func() {
 		requestWriter := newRequestWriter()
 		conn := mockquic.NewMockEarlyConnection(mockCtrl)
 		str = newRequestStream(
-			newStream(qstr, newConnection(conn, false, protocol.PerspectiveClient, nil), nil),
+			newStream(qstr, newConnection(context.Background(), conn, false, protocol.PerspectiveClient, nil), nil),
 			requestWriter,
 			make(chan struct{}),
 			qpack.NewDecoder(func(qpack.HeaderField) {}),

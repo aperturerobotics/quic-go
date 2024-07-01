@@ -27,6 +27,7 @@ var _ = Describe("Client", func() {
 		config     *Config
 
 		originalClientConnConstructor func(
+			ctx context.Context,
 			conn sendConn,
 			runner connRunner,
 			destConnID protocol.ConnectionID,
@@ -38,7 +39,6 @@ var _ = Describe("Client", func() {
 			enable0RTT bool,
 			hasNegotiatedVersion bool,
 			tracer *logging.ConnectionTracer,
-			tracingID ConnectionTracingID,
 			logger utils.Logger,
 			v protocol.Version,
 		) quicConn
@@ -101,6 +101,7 @@ var _ = Describe("Client", func() {
 
 			run := make(chan struct{})
 			newClientConnection = func(
+				_ context.Context,
 				_ sendConn,
 				_ connRunner,
 				_ protocol.ConnectionID,
@@ -112,7 +113,6 @@ var _ = Describe("Client", func() {
 				enable0RTT bool,
 				_ bool,
 				_ *logging.ConnectionTracer,
-				_ ConnectionTracingID,
 				_ utils.Logger,
 				_ protocol.Version,
 			) quicConn {
@@ -138,6 +138,7 @@ var _ = Describe("Client", func() {
 			readyChan := make(chan struct{})
 			done := make(chan struct{})
 			newClientConnection = func(
+				_ context.Context,
 				_ sendConn,
 				runner connRunner,
 				_ protocol.ConnectionID,
@@ -149,7 +150,6 @@ var _ = Describe("Client", func() {
 				enable0RTT bool,
 				_ bool,
 				_ *logging.ConnectionTracer,
-				_ ConnectionTracingID,
 				_ utils.Logger,
 				_ protocol.Version,
 			) quicConn {
@@ -175,6 +175,7 @@ var _ = Describe("Client", func() {
 
 			testErr := errors.New("early handshake error")
 			newClientConnection = func(
+				_ context.Context,
 				_ sendConn,
 				_ connRunner,
 				_ protocol.ConnectionID,
@@ -186,7 +187,6 @@ var _ = Describe("Client", func() {
 				_ bool,
 				_ bool,
 				_ *logging.ConnectionTracer,
-				_ ConnectionTracingID,
 				_ utils.Logger,
 				_ protocol.Version,
 			) quicConn {
@@ -260,6 +260,7 @@ var _ = Describe("Client", func() {
 			var conf *Config
 			done := make(chan struct{})
 			newClientConnection = func(
+				_ context.Context,
 				connP sendConn,
 				_ connRunner,
 				_ protocol.ConnectionID,
@@ -271,7 +272,6 @@ var _ = Describe("Client", func() {
 				_ bool,
 				_ bool,
 				_ *logging.ConnectionTracer,
-				_ ConnectionTracingID,
 				_ utils.Logger,
 				versionP protocol.Version,
 			) quicConn {
@@ -303,6 +303,7 @@ var _ = Describe("Client", func() {
 		It("creates a new connections after version negotiation", func() {
 			var counter int
 			newClientConnection = func(
+				_ context.Context,
 				_ sendConn,
 				runner connRunner,
 				_ protocol.ConnectionID,
@@ -314,7 +315,6 @@ var _ = Describe("Client", func() {
 				_ bool,
 				hasNegotiatedVersion bool,
 				_ *logging.ConnectionTracer,
-				_ ConnectionTracingID,
 				_ utils.Logger,
 				versionP protocol.Version,
 			) quicConn {

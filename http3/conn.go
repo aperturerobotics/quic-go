@@ -37,6 +37,7 @@ type Connection interface {
 
 type connection struct {
 	quic.Connection
+	ctx context.Context
 
 	perspective protocol.Perspective
 	logger      *slog.Logger
@@ -53,12 +54,14 @@ type connection struct {
 }
 
 func newConnection(
+	ctx context.Context,
 	quicConn quic.Connection,
 	enableDatagrams bool,
 	perspective protocol.Perspective,
 	logger *slog.Logger,
 ) *connection {
-	c := &connection{
+	return &connection{
+		ctx:              ctx,
 		Connection:       quicConn,
 		perspective:      perspective,
 		logger:           logger,
@@ -67,30 +70,13 @@ func newConnection(
 		receivedSettings: make(chan struct{}),
 		streams:          make(map[protocol.StreamID]*datagrammer),
 	}
-	return c
 }
 
-func (c *connection) onStreamStateChange(id quic.StreamID, state streamState, e error) {
+func (c *connection) clearStream(id quic.StreamID) {
 	c.streamMx.Lock()
 	defer c.streamMx.Unlock()
 
-	d, ok := c.streams[id]
-	if !ok { // should never happen
-		return
-	}
-	var isDone bool
-	//nolint:exhaustive // These are all the cases we care about.
-	switch state {
-	case streamStateReceiveClosed:
-		isDone = d.SetReceiveError(e)
-	case streamStateSendClosed:
-		isDone = d.SetSendError(e)
-	default:
-		return
-	}
-	if isDone {
-		delete(c.streams, id)
-	}
+	delete(c.streams, id)
 }
 
 func (c *connection) openRequestStream(
@@ -108,7 +94,7 @@ func (c *connection) openRequestStream(
 	c.streamMx.Lock()
 	c.streams[str.StreamID()] = datagrams
 	c.streamMx.Unlock()
-	qstr := newStateTrackingStream(str, func(s streamState, e error) { c.onStreamStateChange(str.StreamID(), s, e) })
+	qstr := newStateTrackingStream(str, c, datagrams)
 	hstr := newStream(qstr, c, datagrams)
 	return newRequestStream(hstr, requestWriter, reqDone, c.decoder, disableCompression, maxHeaderBytes), nil
 }
@@ -120,10 +106,11 @@ func (c *connection) acceptStream(ctx context.Context) (quic.Stream, *datagramme
 	}
 	datagrams := newDatagrammer(func(b []byte) error { return c.sendDatagram(str.StreamID(), b) })
 	if c.perspective == protocol.PerspectiveServer {
+		strID := str.StreamID()
 		c.streamMx.Lock()
-		c.streams[str.StreamID()] = datagrams
+		c.streams[strID] = datagrams
 		c.streamMx.Unlock()
-		str = newStateTrackingStream(str, func(s streamState, e error) { c.onStreamStateChange(str.StreamID(), s, e) })
+		str = newStateTrackingStream(str, c, datagrams)
 	}
 	return str, datagrams, nil
 }
@@ -200,7 +187,8 @@ func (c *connection) HandleUnidirectionalStreams(hijack func(StreamType, quic.Co
 				c.Connection.CloseWithError(quic.ApplicationErrorCode(ErrCodeStreamCreationError), "duplicate control stream")
 				return
 			}
-			f, err := parseNextFrame(str, nil)
+			fp := &frameParser{conn: c.Connection, r: str}
+			f, err := fp.ParseNext()
 			if err != nil {
 				c.Connection.CloseWithError(quic.ApplicationErrorCode(ErrCodeFrameError), "")
 				return
@@ -278,3 +266,5 @@ func (c *connection) ReceivedSettings() <-chan struct{} { return c.receivedSetti
 // Settings returns the settings received on this connection.
 // It is only valid to call this function after the channel returned by ReceivedSettings was closed.
 func (c *connection) Settings() *Settings { return c.settings }
+
+func (c *connection) Context() context.Context { return c.ctx }

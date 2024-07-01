@@ -82,7 +82,13 @@ func (c *SingleDestinationRoundTripper) Start() Connection {
 func (c *SingleDestinationRoundTripper) init() {
 	c.decoder = qpack.NewDecoder(func(hf qpack.HeaderField) {})
 	c.requestWriter = newRequestWriter()
-	c.hconn = newConnection(c.Connection, c.EnableDatagrams, protocol.PerspectiveClient, c.Logger)
+	c.hconn = newConnection(
+		c.Connection.Context(),
+		c.Connection,
+		c.EnableDatagrams,
+		protocol.PerspectiveClient,
+		c.Logger,
+	)
 	// send the SETTINGs frame, using 0-RTT data, if possible
 	go func() {
 		if err := c.setupConn(c.hconn); err != nil {
@@ -121,12 +127,16 @@ func (c *SingleDestinationRoundTripper) handleBidirectionalStreams() {
 			}
 			return
 		}
-		go func(str quic.Stream) {
-			_, err := parseNextFrame(str, func(ft FrameType, e error) (processed bool, err error) {
+		fp := &frameParser{
+			r:    str,
+			conn: c.hconn,
+			unknownFrameHandler: func(ft FrameType, e error) (processed bool, err error) {
 				id := c.hconn.Context().Value(quic.ConnectionTracingKey).(quic.ConnectionTracingID)
 				return c.StreamHijacker(ft, id, str, e)
-			})
-			if err == errHijacked {
+			},
+		}
+		go func() {
+			if _, err := fp.ParseNext(); err == errHijacked {
 				return
 			}
 			if err != nil {
@@ -135,7 +145,7 @@ func (c *SingleDestinationRoundTripper) handleBidirectionalStreams() {
 				}
 			}
 			c.hconn.CloseWithError(quic.ApplicationErrorCode(ErrCodeFrameUnexpected), "received HTTP/3 frame on bidirectional stream")
-		}(str)
+		}()
 	}
 }
 

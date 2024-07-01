@@ -326,6 +326,7 @@ var _ = Describe("Client", func() {
 				return len(b), nil
 			})
 			conn := mockquic.NewMockEarlyConnection(mockCtrl)
+			conn.EXPECT().Context().Return(context.Background())
 			conn.EXPECT().OpenUniStream().Return(controlStr, nil)
 			conn.EXPECT().OpenStreamSync(gomock.Any()).DoAndReturn(func(context.Context) (quic.Stream, error) {
 				<-settingsFrameWritten
@@ -360,6 +361,7 @@ var _ = Describe("Client", func() {
 				<-done
 				return nil, errors.New("test done")
 			}).MaxTimes(1)
+			conn.EXPECT().Context().Return(context.Background())
 			b := quicvarint.Append(nil, streamTypeControlStream)
 			b = (&settingsFrame{ExtendedConnect: true}).Append(b)
 			r := bytes.NewReader(b)
@@ -384,11 +386,15 @@ var _ = Describe("Client", func() {
 		It("checks the server's SETTINGS before sending an Extended CONNECT request", func() {
 			sendSettings()
 			done := make(chan struct{})
+			var wg sync.WaitGroup
+			wg.Add(2)
 			conn := mockquic.NewMockEarlyConnection(mockCtrl)
 			conn.EXPECT().OpenUniStream().DoAndReturn(func() (quic.SendStream, error) {
 				<-done
+				wg.Done()
 				return nil, errors.New("test done")
 			}).MaxTimes(1)
+			conn.EXPECT().Context().Return(context.Background())
 			b := quicvarint.Append(nil, streamTypeControlStream)
 			b = (&settingsFrame{ExtendedConnect: true}).Append(b)
 			r := bytes.NewReader(b)
@@ -397,6 +403,7 @@ var _ = Describe("Client", func() {
 			conn.EXPECT().AcceptUniStream(gomock.Any()).Return(controlStr, nil)
 			conn.EXPECT().AcceptUniStream(gomock.Any()).DoAndReturn(func(context.Context) (quic.ReceiveStream, error) {
 				<-done
+				wg.Done()
 				return nil, errors.New("test done")
 			})
 			conn.EXPECT().HandshakeComplete().Return(handshakeChan)
@@ -414,14 +421,19 @@ var _ = Describe("Client", func() {
 			// test shutdown
 			conn.EXPECT().CloseWithError(gomock.Any(), gomock.Any()).MaxTimes(1)
 			close(done)
+			wg.Wait()
 		})
 
 		It("rejects Extended CONNECT requests if the server doesn't enable it", func() {
 			sendSettings()
 			done := make(chan struct{})
+			var wg sync.WaitGroup
+			wg.Add(2)
 			conn := mockquic.NewMockEarlyConnection(mockCtrl)
+			conn.EXPECT().Context().Return(context.Background())
 			conn.EXPECT().OpenUniStream().DoAndReturn(func() (quic.SendStream, error) {
 				<-done
+				wg.Done()
 				return nil, errors.New("test done")
 			}).MaxTimes(1)
 			b := quicvarint.Append(nil, streamTypeControlStream)
@@ -432,6 +444,7 @@ var _ = Describe("Client", func() {
 			conn.EXPECT().AcceptUniStream(gomock.Any()).Return(controlStr, nil)
 			conn.EXPECT().AcceptUniStream(gomock.Any()).DoAndReturn(func(context.Context) (quic.ReceiveStream, error) {
 				<-done
+				wg.Done()
 				return nil, errors.New("test done")
 			})
 			conn.EXPECT().HandshakeComplete().Return(handshakeChan)
@@ -448,6 +461,7 @@ var _ = Describe("Client", func() {
 			// test shutdown
 			conn.EXPECT().CloseWithError(gomock.Any(), gomock.Any()).MaxTimes(1)
 			close(done)
+			wg.Wait()
 		})
 	})
 
@@ -465,7 +479,8 @@ var _ = Describe("Client", func() {
 			fields := make(map[string]string)
 			decoder := qpack.NewDecoder(nil)
 
-			frame, err := parseNextFrame(str, nil)
+			fp := frameParser{r: str}
+			frame, err := fp.ParseNext()
 			ExpectWithOffset(1, err).ToNot(HaveOccurred())
 			ExpectWithOffset(1, frame).To(BeAssignableToTypeOf(&headersFrame{}))
 			headersFrame := frame.(*headersFrame)
@@ -493,8 +508,10 @@ var _ = Describe("Client", func() {
 				return len(b), nil
 			}) // SETTINGS frame
 			str = mockquic.NewMockStream(mockCtrl)
+			str.EXPECT().Context().Return(context.Background()).AnyTimes()
 			str.EXPECT().StreamID().AnyTimes()
 			conn = mockquic.NewMockEarlyConnection(mockCtrl)
+			conn.EXPECT().Context().Return(context.Background())
 			conn.EXPECT().OpenUniStream().Return(controlStr, nil)
 			conn.EXPECT().AcceptUniStream(gomock.Any()).DoAndReturn(func(context.Context) (quic.ReceiveStream, error) {
 				<-testDone

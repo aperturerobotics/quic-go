@@ -13,6 +13,7 @@ jobs:
           - os: "macos"
             go: "1.21.x"
     runs-on: ${{ fromJSON(vars[format('INTEGRATION_RUNNER_{0}', matrix.os)] || format('"{0}-latest"', matrix.os)) }}
+    timeout-minutes: 30
     defaults:
       run:
         shell: bash # by default Windows uses PowerShell, which uses a different syntax for setting environment variables
@@ -57,6 +58,8 @@ jobs:
           go run github.com/onsi/ginkgo/v2/ginkgo -r -v -randomize-all -randomize-suites -trace -skip-package self,versionnegotiation integrationtests
           go run github.com/onsi/ginkgo/v2/ginkgo -r -v -randomize-all -randomize-suites -trace integrationtests/versionnegotiation -- ${{ env.QLOGFLAG }}
           go run github.com/onsi/ginkgo/v2/ginkgo -r -v -randomize-all -randomize-suites -trace integrationtests/self -- ${{ env.QLOGFLAG }}
+      - name: Run benchmarks
+        run: go test -v -run=^$ -bench=. ./integrationtests/self
       - name: save qlogs
         if: ${{ always() && env.DEBUG == 'true' }}
         uses: actions/upload-artifact@v4

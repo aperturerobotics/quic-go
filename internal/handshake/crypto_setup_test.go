@@ -1,6 +1,7 @@
 package handshake
 
 import (
+	"context"
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/tls"
@@ -8,7 +9,6 @@ import (
 	"crypto/x509/pkix"
 	"math/big"
 	"net"
-	"reflect"
 	"time"
 
 	mocktls "github.com/quic-go/quic-go/internal/mocks/tls"
@@ -75,7 +75,7 @@ var _ = Describe("Crypto Setup TLS", func() {
 			protocol.Version1,
 		)
 
-		Expect(cl.StartHandshake()).To(MatchError(&qerr.TransportError{
+		Expect(cl.StartHandshake(context.Background())).To(MatchError(&qerr.TransportError{
 			ErrorCode:    qerr.InternalError,
 			ErrorMessage: "tls: invalid NextProtos value",
 		}))
@@ -96,86 +96,13 @@ var _ = Describe("Crypto Setup TLS", func() {
 			protocol.Version1,
 		)
 
-		Expect(server.StartHandshake()).To(Succeed())
+		Expect(server.StartHandshake(context.Background())).To(Succeed())
 
 		fakeCH := append([]byte{typeClientHello, 0, 0, 6}, []byte("foobar")...)
 		// wrong encryption level
 		err := server.HandleMessage(fakeCH, protocol.EncryptionHandshake)
 		Expect(err).To(HaveOccurred())
 		Expect(err.Error()).To(ContainSubstring("tls: handshake data received at wrong level"))
-	})
-
-	Context("filling in a net.Conn in tls.ClientHelloInfo", func() {
-		var (
-			local  = &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1), Port: 42}
-			remote = &net.UDPAddr{IP: net.IPv4(192, 168, 0, 1), Port: 1337}
-		)
-
-		It("wraps GetCertificate", func() {
-			var localAddr, remoteAddr net.Addr
-			tlsConf := &tls.Config{
-				GetCertificate: func(info *tls.ClientHelloInfo) (*tls.Certificate, error) {
-					localAddr = info.Conn.LocalAddr()
-					remoteAddr = info.Conn.RemoteAddr()
-					cert := generateCert()
-					return &cert, nil
-				},
-			}
-			addConnToClientHelloInfo(tlsConf, local, remote)
-			_, err := tlsConf.GetCertificate(&tls.ClientHelloInfo{})
-			Expect(err).ToNot(HaveOccurred())
-			Expect(localAddr).To(Equal(local))
-			Expect(remoteAddr).To(Equal(remote))
-		})
-
-		It("wraps GetConfigForClient", func() {
-			var localAddr, remoteAddr net.Addr
-			tlsConf := &tls.Config{
-				GetConfigForClient: func(info *tls.ClientHelloInfo) (*tls.Config, error) {
-					localAddr = info.Conn.LocalAddr()
-					remoteAddr = info.Conn.RemoteAddr()
-					return &tls.Config{}, nil
-				},
-			}
-			addConnToClientHelloInfo(tlsConf, local, remote)
-			conf, err := tlsConf.GetConfigForClient(&tls.ClientHelloInfo{})
-			Expect(err).ToNot(HaveOccurred())
-			Expect(localAddr).To(Equal(local))
-			Expect(remoteAddr).To(Equal(remote))
-			Expect(conf).ToNot(BeNil())
-			Expect(conf.MinVersion).To(BeEquivalentTo(tls.VersionTLS13))
-		})
-
-		It("wraps GetConfigForClient, recursively", func() {
-			var localAddr, remoteAddr net.Addr
-			tlsConf := &tls.Config{}
-			var innerConf *tls.Config
-			getCert := func(info *tls.ClientHelloInfo) (*tls.Certificate, error) { //nolint:unparam
-				localAddr = info.Conn.LocalAddr()
-				remoteAddr = info.Conn.RemoteAddr()
-				cert := generateCert()
-				return &cert, nil
-			}
-			tlsConf.GetConfigForClient = func(info *tls.ClientHelloInfo) (*tls.Config, error) {
-				innerConf = tlsConf.Clone()
-				// set the MaxVersion, so we can check that quic-go doesn't overwrite the user's config
-				innerConf.MaxVersion = tls.VersionTLS12
-				innerConf.GetCertificate = getCert
-				return innerConf, nil
-			}
-			addConnToClientHelloInfo(tlsConf, local, remote)
-			conf, err := tlsConf.GetConfigForClient(&tls.ClientHelloInfo{})
-			Expect(err).ToNot(HaveOccurred())
-			Expect(conf).ToNot(BeNil())
-			Expect(conf.MinVersion).To(BeEquivalentTo(tls.VersionTLS13))
-			_, err = conf.GetCertificate(&tls.ClientHelloInfo{})
-			Expect(err).ToNot(HaveOccurred())
-			Expect(localAddr).To(Equal(local))
-			Expect(remoteAddr).To(Equal(remote))
-			// make sure that the tls.Config returned by GetConfigForClient isn't modified
-			Expect(reflect.ValueOf(innerConf.GetCertificate).Pointer() == reflect.ValueOf(getCert).Pointer()).To(BeTrue())
-			Expect(innerConf.MaxVersion).To(BeEquivalentTo(tls.VersionTLS12))
-		})
 	})
 
 	Context("doing the handshake", func() {
@@ -189,8 +116,8 @@ var _ = Describe("Crypto Setup TLS", func() {
 		// The clientEvents and serverEvents contain all events that were not processed by the function,
 		// i.e. not EventWriteInitialData, EventWriteHandshakeData, EventHandshakeComplete.
 		handshake := func(client, server CryptoSetup) (clientEvents []Event, clientErr error, serverEvents []Event, serverErr error) {
-			Expect(client.StartHandshake()).To(Succeed())
-			Expect(server.StartHandshake()).To(Succeed())
+			Expect(client.StartHandshake(context.Background())).To(Succeed())
+			Expect(server.StartHandshake(context.Background())).To(Succeed())
 
 			var clientHandshakeComplete, serverHandshakeComplete bool
 
@@ -198,7 +125,6 @@ var _ = Describe("Crypto Setup TLS", func() {
 			clientLoop:
 				for {
 					ev := client.NextEvent()
-					//nolint:exhaustive // only need to process a few events
 					switch ev.Kind {
 					case EventNoEvent:
 						break clientLoop
@@ -222,7 +148,6 @@ var _ = Describe("Crypto Setup TLS", func() {
 			serverLoop:
 				for {
 					ev := server.NextEvent()
-					//nolint:exhaustive // only need to process a few events
 					switch ev.Kind {
 					case EventNoEvent:
 						break serverLoop
@@ -549,7 +474,6 @@ var _ = Describe("Crypto Setup TLS", func() {
 				var tp *wire.TransportParameters
 				var clientReceived0RTTKeys bool
 				for _, ev := range clientEvents {
-					//nolint:exhaustive // only need to process a few events
 					switch ev.Kind {
 					case EventRestoredTransportParameters:
 						tp = ev.TransportParameters
@@ -563,7 +487,6 @@ var _ = Describe("Crypto Setup TLS", func() {
 
 				var serverReceived0RTTKeys bool
 				for _, ev := range serverEvents {
-					//nolint:exhaustive // only need to process a few events
 					switch ev.Kind {
 					case EventReceivedReadKeys:
 						serverReceived0RTTKeys = true
@@ -621,7 +544,6 @@ var _ = Describe("Crypto Setup TLS", func() {
 				var tp *wire.TransportParameters
 				var clientReceived0RTTKeys bool
 				for _, ev := range clientEvents {
-					//nolint:exhaustive // only need to process a few events
 					switch ev.Kind {
 					case EventRestoredTransportParameters:
 						tp = ev.TransportParameters
