@@ -11,36 +11,15 @@ import (
 	"github.com/quic-go/quic-go/quicvarint"
 )
 
-type framer interface {
-	HasData() bool
-
-	QueueControlFrame(wire.Frame)
-	AppendControlFrames([]ackhandler.Frame, protocol.ByteCount, protocol.Version) ([]ackhandler.Frame, protocol.ByteCount)
-
-	AddActiveStream(protocol.StreamID)
-	AppendStreamFrames([]ackhandler.StreamFrame, protocol.ByteCount, protocol.Version) ([]ackhandler.StreamFrame, protocol.ByteCount)
-
-	Handle0RTTRejection() error
-
-	// QueuedTooManyControlFrames says if the control frame queue exceeded its maximum queue length.
-	// This is a hack.
-	// It is easier to implement than propagating an error return value in QueueControlFrame.
-	// The correct solution would be to queue frames with their respective structs.
-	// See https://github.com/quic-go/quic-go/issues/4271 for the queueing of stream-related control frames.
-	QueuedTooManyControlFrames() bool
-}
-
 const (
 	maxPathResponses = 256
 	maxControlFrames = 16 << 10
 )
 
-type framerI struct {
+type framer struct {
 	mutex sync.Mutex
 
-	streamGetter streamGetter
-
-	activeStreams map[protocol.StreamID]struct{}
+	activeStreams map[protocol.StreamID]sendStreamI
 	streamQueue   ringbuffer.RingBuffer[protocol.StreamID]
 
 	controlFrameMutex          sync.Mutex
@@ -49,16 +28,11 @@ type framerI struct {
 	queuedTooManyControlFrames bool
 }
 
-var _ framer = &framerI{}
-
-func newFramer(streamGetter streamGetter) framer {
-	return &framerI{
-		streamGetter:  streamGetter,
-		activeStreams: make(map[protocol.StreamID]struct{}),
-	}
+func newFramer() *framer {
+	return &framer{activeStreams: make(map[protocol.StreamID]sendStreamI)}
 }
 
-func (f *framerI) HasData() bool {
+func (f *framer) HasData() bool {
 	f.mutex.Lock()
 	hasData := !f.streamQueue.Empty()
 	f.mutex.Unlock()
@@ -70,7 +44,7 @@ func (f *framerI) HasData() bool {
 	return len(f.controlFrames) > 0 || len(f.pathResponses) > 0
 }
 
-func (f *framerI) QueueControlFrame(frame wire.Frame) {
+func (f *framer) QueueControlFrame(frame wire.Frame) {
 	f.controlFrameMutex.Lock()
 	defer f.controlFrameMutex.Unlock()
 
@@ -92,7 +66,7 @@ func (f *framerI) QueueControlFrame(frame wire.Frame) {
 	f.controlFrames = append(f.controlFrames, frame)
 }
 
-func (f *framerI) AppendControlFrames(frames []ackhandler.Frame, maxLen protocol.ByteCount, v protocol.Version) ([]ackhandler.Frame, protocol.ByteCount) {
+func (f *framer) AppendControlFrames(frames []ackhandler.Frame, maxLen protocol.ByteCount, v protocol.Version) ([]ackhandler.Frame, protocol.ByteCount) {
 	f.controlFrameMutex.Lock()
 	defer f.controlFrameMutex.Unlock()
 
@@ -121,20 +95,35 @@ func (f *framerI) AppendControlFrames(frames []ackhandler.Frame, maxLen protocol
 	return frames, length
 }
 
-func (f *framerI) QueuedTooManyControlFrames() bool {
+// QueuedTooManyControlFrames says if the control frame queue exceeded its maximum queue length.
+// This is a hack.
+// It is easier to implement than propagating an error return value in QueueControlFrame.
+// The correct solution would be to queue frames with their respective structs.
+// See https://github.com/quic-go/quic-go/issues/4271 for the queueing of stream-related control frames.
+func (f *framer) QueuedTooManyControlFrames() bool {
 	return f.queuedTooManyControlFrames
 }
 
-func (f *framerI) AddActiveStream(id protocol.StreamID) {
+func (f *framer) AddActiveStream(id protocol.StreamID, str sendStreamI) {
 	f.mutex.Lock()
 	if _, ok := f.activeStreams[id]; !ok {
 		f.streamQueue.PushBack(id)
-		f.activeStreams[id] = struct{}{}
+		f.activeStreams[id] = str
 	}
 	f.mutex.Unlock()
 }
 
-func (f *framerI) AppendStreamFrames(frames []ackhandler.StreamFrame, maxLen protocol.ByteCount, v protocol.Version) ([]ackhandler.StreamFrame, protocol.ByteCount) {
+// RemoveActiveStream is called when a stream completes.
+func (f *framer) RemoveActiveStream(id protocol.StreamID) {
+	f.mutex.Lock()
+	delete(f.activeStreams, id)
+	// We don't delete the stream from the streamQueue,
+	// since we'd have to iterate over the ringbuffer.
+	// Instead, we check if the stream is still in activeStreams in AppendStreamFrames.
+	f.mutex.Unlock()
+}
+
+func (f *framer) AppendStreamFrames(frames []ackhandler.StreamFrame, maxLen protocol.ByteCount, v protocol.Version) ([]ackhandler.StreamFrame, protocol.ByteCount) {
 	startLen := len(frames)
 	var length protocol.ByteCount
 	f.mutex.Lock()
@@ -147,10 +136,9 @@ func (f *framerI) AppendStreamFrames(frames []ackhandler.StreamFrame, maxLen pro
 		id := f.streamQueue.PopFront()
 		// This should never return an error. Better check it anyway.
 		// The stream will only be in the streamQueue, if it enqueued itself there.
-		str, err := f.streamGetter.GetOrOpenSendStream(id)
-		// The stream can be nil if it completed after it said it had data.
-		if str == nil || err != nil {
-			delete(f.activeStreams, id)
+		str, ok := f.activeStreams[id]
+		// The stream might have been removed after being enqueued.
+		if !ok {
 			continue
 		}
 		remainingLen := maxLen - length
@@ -183,7 +171,7 @@ func (f *framerI) AppendStreamFrames(frames []ackhandler.StreamFrame, maxLen pro
 	return frames, length
 }
 
-func (f *framerI) Handle0RTTRejection() error {
+func (f *framer) Handle0RTTRejection() error {
 	f.mutex.Lock()
 	defer f.mutex.Unlock()
 

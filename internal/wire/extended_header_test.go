@@ -1,6 +1,8 @@
 package wire
 
 import (
+	"testing"
+
 	"github.com/quic-go/quic-go/internal/protocol"
 	"github.com/quic-go/quic-go/quicvarint"
 
@@ -249,3 +251,33 @@ var _ = Describe("Header", func() {
 		})
 	})
 })
+
+func BenchmarkParseExtendedHeader(b *testing.B) {
+	data, err := (&ExtendedHeader{
+		Header: Header{
+			Type:             protocol.PacketTypeHandshake,
+			DestConnectionID: protocol.ParseConnectionID([]byte{0xde, 0xad, 0xbe, 0xef, 0xca, 0xfe}),
+			SrcConnectionID:  protocol.ParseConnectionID([]byte{0xde, 0xca, 0xfb, 0xad, 0x0, 0x0, 0x13, 0x37}),
+			Version:          protocol.Version1,
+			Length:           1234,
+		},
+		PacketNumber:    0xdecaf,
+		PacketNumberLen: protocol.PacketNumberLen3,
+	}).Append(nil, protocol.Version1)
+	if err != nil {
+		b.Fatal(err)
+	}
+	data = append(data, make([]byte, 1231)...)
+
+	b.ResetTimer()
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		hdr, _, _, err := ParsePacket(data)
+		if err != nil {
+			b.Fatal(err)
+		}
+		if _, err := hdr.ParseExtended(data); err != nil {
+			b.Fatal(err)
+		}
+	}
+}

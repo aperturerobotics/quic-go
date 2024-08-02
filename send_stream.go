@@ -172,7 +172,7 @@ func (s *sendStream) write(p []byte) (bool /* is newly completed */, int, error)
 
 		s.mutex.Unlock()
 		if !notifiedSender {
-			s.sender.onHasStreamData(s.streamID) // must be called without holding the mutex
+			s.sender.onHasStreamData(s.streamID, s) // must be called without holding the mutex
 			notifiedSender = true
 		}
 		if copied {
@@ -262,10 +262,10 @@ func (s *sendStream) popNewOrRetransmittedStreamFrame(maxBytes protocol.ByteCoun
 
 	sendWindow := s.flowController.SendWindowSize()
 	if sendWindow == 0 {
-		if isBlocked, offset := s.flowController.IsNewlyBlocked(); isBlocked {
+		if s.flowController.IsNewlyBlocked() {
 			s.sender.queueControlFrame(&wire.StreamDataBlockedFrame{
 				StreamID:          s.streamID,
-				MaximumStreamData: offset,
+				MaximumStreamData: s.writeOffset,
 			})
 			return nil, false
 		}
@@ -379,7 +379,7 @@ func (s *sendStream) isNewlyCompleted() bool {
 	// 1. the application called CancelWrite, or
 	// 2. we received a STOP_SENDING, and
 	// 		* the application consumed the error via Write, or
-	//		* the application called CLsoe
+	//		* the application called Close
 	if s.cancelWriteErr != nil && (s.cancellationFlagged || s.finishedWriting) {
 		s.completed = true
 		return true
@@ -407,7 +407,7 @@ func (s *sendStream) Close() error {
 	if cancelWriteErr != nil {
 		return fmt.Errorf("close called for canceled stream %d", s.streamID)
 	}
-	s.sender.onHasStreamData(s.streamID) // need to send the FIN, must be called without holding the mutex
+	s.sender.onHasStreamData(s.streamID, s) // need to send the FIN, must be called without holding the mutex
 
 	s.ctxCancel(nil)
 	return nil
@@ -421,6 +421,17 @@ func (s *sendStream) cancelWriteImpl(errorCode qerr.StreamErrorCode, remote bool
 	s.mutex.Lock()
 	if !remote {
 		s.cancellationFlagged = true
+		if s.cancelWriteErr != nil {
+			completed := s.isNewlyCompleted()
+			s.mutex.Unlock()
+			// The user has called CancelWrite. If the previous cancellation was
+			// because of a STOP_SENDING, we don't need to flag the error to the
+			// user any more.
+			if completed {
+				s.sender.onStreamCompleted(s.streamID)
+			}
+			return
+		}
 	}
 	if s.cancelWriteErr != nil {
 		s.mutex.Unlock()
@@ -453,7 +464,7 @@ func (s *sendStream) updateSendWindow(limit protocol.ByteCount) {
 	hasStreamData := s.dataForWriting != nil || s.nextFrame != nil
 	s.mutex.Unlock()
 	if hasStreamData {
-		s.sender.onHasStreamData(s.streamID)
+		s.sender.onHasStreamData(s.streamID, s)
 	}
 }
 
@@ -530,5 +541,5 @@ func (s *sendStreamAckHandler) OnLost(f wire.Frame) {
 	}
 	s.mutex.Unlock()
 
-	s.sender.onHasStreamData(s.streamID)
+	s.sender.onHasStreamData(s.streamID, (*sendStream)(s))
 }

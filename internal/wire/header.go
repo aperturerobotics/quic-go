@@ -274,9 +274,9 @@ func (h *Header) ParsedLen() protocol.ByteCount {
 
 // ParseExtended parses the version dependent part of the header.
 // The Reader has to be set such that it points to the first byte of the header.
-func (h *Header) ParseExtended(b *bytes.Reader, ver protocol.Version) (*ExtendedHeader, error) {
+func (h *Header) ParseExtended(data []byte) (*ExtendedHeader, error) {
 	extHdr := h.toExtendedHeader()
-	reservedBitsValid, err := extHdr.parse(b, ver)
+	reservedBitsValid, err := extHdr.parse(data)
 	if err != nil {
 		return nil, err
 	}
@@ -293,4 +293,21 @@ func (h *Header) toExtendedHeader() *ExtendedHeader {
 // PacketType is the type of the packet, for logging purposes
 func (h *Header) PacketType() string {
 	return h.Type.String()
+}
+
+func readPacketNumber(data []byte, pnLen protocol.PacketNumberLen) (protocol.PacketNumber, error) {
+	var pn protocol.PacketNumber
+	switch pnLen {
+	case protocol.PacketNumberLen1:
+		pn = protocol.PacketNumber(data[0])
+	case protocol.PacketNumberLen2:
+		pn = protocol.PacketNumber(binary.BigEndian.Uint16(data[:2]))
+	case protocol.PacketNumberLen3:
+		pn = protocol.PacketNumber(uint32(data[2]) + uint32(data[1])<<8 + uint32(data[0])<<16)
+	case protocol.PacketNumberLen4:
+		pn = protocol.PacketNumber(binary.BigEndian.Uint32(data[:4]))
+	default:
+		return 0, fmt.Errorf("invalid packet number length: %d", pnLen)
+	}
+	return pn, nil
 }
