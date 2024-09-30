@@ -784,7 +784,7 @@ var _ = Describe("Connection", func() {
 			conn.receivedPacketHandler = rph
 			packet.rcvTime = rcvTime
 			tracer.EXPECT().ReceivedShortHeaderPacket(
-				&logging.ShortHeader{PacketNumber: 0x1337, PacketNumberLen: 2, KeyPhase: protocol.KeyPhaseZero},
+				&logging.ShortHeader{DestConnectionID: srcConnID, PacketNumber: 0x1337, PacketNumberLen: 2, KeyPhase: protocol.KeyPhaseZero},
 				protocol.ByteCount(len(packet.data)),
 				logging.ECT1,
 				[]logging.Frame{&logging.PingFrame{}},
@@ -1284,6 +1284,7 @@ var _ = Describe("Connection", func() {
 			sph.EXPECT().SentPacket(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any())
 			fc := mocks.NewMockConnectionFlowController(mockCtrl)
 			fc.EXPECT().IsNewlyBlocked().Return(true, protocol.ByteCount(1337))
+			fc.EXPECT().GetWindowUpdate()
 			expectAppendPacket(packer, shortHeaderPacket{PacketNumber: 13}, []byte("foobar"))
 			packer.EXPECT().AppendPacket(gomock.Any(), gomock.Any(), conn.version).Return(shortHeaderPacket{}, errNothingToPack).AnyTimes()
 			conn.connFlowController = fc
@@ -2764,7 +2765,7 @@ var _ = Describe("Client Connection", func() {
 				errChan <- conn.run()
 			}()
 			connRunner.EXPECT().Remove(srcConnID)
-			tracer.EXPECT().ReceivedVersionNegotiationPacket(gomock.Any(), gomock.Any(), gomock.Any()).Do(func(_, _ protocol.ArbitraryLenConnectionID, versions []logging.VersionNumber) {
+			tracer.EXPECT().ReceivedVersionNegotiationPacket(gomock.Any(), gomock.Any(), gomock.Any()).Do(func(_, _ protocol.ArbitraryLenConnectionID, versions []logging.Version) {
 				Expect(versions).To(And(
 					ContainElement(protocol.Version(4321)),
 					ContainElement(protocol.Version(1337)),
@@ -2797,7 +2798,7 @@ var _ = Describe("Client Connection", func() {
 				tracer.EXPECT().ClosedConnection(gomock.Any()).Do(func(e error) {
 					var vnErr *VersionNegotiationError
 					Expect(errors.As(e, &vnErr)).To(BeTrue())
-					Expect(vnErr.Theirs).To(ContainElement(logging.VersionNumber(12345678)))
+					Expect(vnErr.Theirs).To(ContainElement(logging.Version(12345678)))
 				}),
 				tracer.EXPECT().Close(),
 			)

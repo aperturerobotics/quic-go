@@ -140,7 +140,6 @@ type connection struct {
 	receivedPacketHandler ackhandler.ReceivedPacketHandler
 	retransmissionQueue   *retransmissionQueue
 	framer                *framer
-	windowUpdateQueue     *windowUpdateQueue
 	connFlowController    flowcontrol.ConnectionFlowController
 	tokenStoreKey         string                    // only set for the client
 	tokenGenerator        *handshake.TokenGenerator // only set for the server
@@ -152,9 +151,9 @@ type connection struct {
 
 	maxPayloadSizeEstimate atomic.Uint32
 
-	initialStream       cryptoStream
-	handshakeStream     cryptoStream
-	oneRTTStream        cryptoStream // only set for the server
+	initialStream       *cryptoStream
+	handshakeStream     *cryptoStream
+	oneRTTStream        *cryptoStream // only set for the server
 	cryptoStreamHandler cryptoStreamHandler
 
 	receivedPackets  chan receivedPacket
@@ -472,6 +471,7 @@ func (s *connection) preSetup() {
 	s.streamsMap = newStreamsMap(
 		s.ctx,
 		s,
+		s.queueControlFrame,
 		s.newFlowController,
 		uint64(s.config.MaxIncomingStreams),
 		uint64(s.config.MaxIncomingUniStreams),
@@ -487,7 +487,6 @@ func (s *connection) preSetup() {
 	s.lastPacketReceivedTime = now
 	s.creationTime = now
 
-	s.windowUpdateQueue = newWindowUpdateQueue(s.connFlowController, s.framer.QueueControlFrame)
 	s.datagramQueue = newDatagramQueue(s.scheduleSending, s.logger)
 	s.connState.Version = s.version
 }
@@ -801,13 +800,11 @@ func (s *connection) handlePacketImpl(rp receivedPacket) bool {
 	data := rp.data
 	p := rp
 	for len(data) > 0 {
-		var destConnID protocol.ConnectionID
 		if counter > 0 {
 			p = *(p.Clone())
 			p.data = data
 
-			var err error
-			destConnID, err = wire.ParseConnectionID(p.data, s.srcConnIDLen)
+			destConnID, err := wire.ParseConnectionID(p.data, s.srcConnIDLen)
 			if err != nil {
 				if s.tracer != nil && s.tracer.DroppedPacket != nil {
 					s.tracer.DroppedPacket(logging.PacketTypeNotDetermined, protocol.InvalidPacketNumber, protocol.ByteCount(len(data)), logging.PacketDropHeaderParseError)
@@ -867,7 +864,9 @@ func (s *connection) handlePacketImpl(rp receivedPacket) bool {
 			if counter > 0 {
 				p.buffer.Split()
 			}
-			processed = s.handleShortHeaderPacket(p, destConnID)
+			if wasProcessed := s.handleShortHeaderPacket(p); wasProcessed {
+				processed = true
+			}
 			break
 		}
 	}
@@ -876,7 +875,7 @@ func (s *connection) handlePacketImpl(rp receivedPacket) bool {
 	return processed
 }
 
-func (s *connection) handleShortHeaderPacket(p receivedPacket, destConnID protocol.ConnectionID) bool {
+func (s *connection) handleShortHeaderPacket(p receivedPacket) bool {
 	var wasQueued bool
 
 	defer func() {
@@ -886,6 +885,11 @@ func (s *connection) handleShortHeaderPacket(p receivedPacket, destConnID protoc
 		}
 	}()
 
+	destConnID, err := wire.ParseConnectionID(p.data, s.srcConnIDLen)
+	if err != nil {
+		s.tracer.DroppedPacket(logging.PacketType1RTT, protocol.InvalidPacketNumber, protocol.ByteCount(len(p.data)), logging.PacketDropHeaderParseError)
+		return false
+	}
 	pn, pnLen, keyPhase, data, err := s.unpacker.UnpackShortHeader(p.rcvTime, p.data)
 	if err != nil {
 		wasQueued = s.handleUnpackError(err, p, logging.PacketType1RTT)
@@ -1680,10 +1684,8 @@ func (s *connection) dropEncryptionLevel(encLevel protocol.EncryptionLevel) erro
 		s.cryptoStreamHandler.DiscardInitialKeys()
 	case protocol.Encryption0RTT:
 		s.streamsMap.ResetFor0RTT()
-		if err := s.connFlowController.Reset(); err != nil {
-			return err
-		}
-		return s.framer.Handle0RTTRejection()
+		s.framer.Handle0RTTRejection()
+		return s.connFlowController.Reset()
 	}
 	return s.cryptoStreamManager.Drop(encLevel)
 }
@@ -1771,8 +1773,9 @@ func (s *connection) applyTransportParameters() {
 	params := s.peerParams
 	// Our local idle timeout will always be > 0.
 	s.idleTimeout = s.config.MaxIdleTimeout
-	if s.idleTimeout > 0 && params.MaxIdleTimeout < s.idleTimeout {
-		s.idleTimeout = params.MaxIdleTimeout
+	// If the peer advertised an idle timeout, take the minimum of the values.
+	if params.MaxIdleTimeout > 0 {
+		s.idleTimeout = min(s.idleTimeout, params.MaxIdleTimeout)
 	}
 	s.keepAliveInterval = min(s.config.KeepAlivePeriod, min(s.idleTimeout/2, protocol.MaxKeepAliveInterval))
 	s.streamsMap.UpdateLimits(params)
@@ -1881,7 +1884,9 @@ func (s *connection) sendPackets(now time.Time) error {
 	if isBlocked, offset := s.connFlowController.IsNewlyBlocked(); isBlocked {
 		s.framer.QueueControlFrame(&wire.DataBlockedFrame{MaximumData: offset})
 	}
-	s.windowUpdateQueue.QueueAll()
+	if offset := s.connFlowController.GetWindowUpdate(); offset > 0 {
+		s.framer.QueueControlFrame(&wire.MaxDataFrame{MaximumData: offset})
+	}
 	if cf := s.cryptoStreamManager.GetPostHandshakeData(protocol.MaxPostHandshakeCryptoFrameSize); cf != nil {
 		s.queueControlFrame(cf)
 	}
@@ -2251,13 +2256,13 @@ func (s *connection) queueControlFrame(f wire.Frame) {
 	s.scheduleSending()
 }
 
-func (s *connection) onHasStreamWindowUpdate(id protocol.StreamID, str receiveStreamI) {
-	s.windowUpdateQueue.AddStream(id, str)
+func (s *connection) onHasStreamData(id protocol.StreamID, str sendStreamI) {
+	s.framer.AddActiveStream(id, str)
 	s.scheduleSending()
 }
 
-func (s *connection) onHasStreamData(id protocol.StreamID, str sendStreamI) {
-	s.framer.AddActiveStream(id, str)
+func (s *connection) onHasStreamControlFrame(id protocol.StreamID, str streamControlFrameGetter) {
+	s.framer.AddStreamWithControlFrames(id, str)
 	s.scheduleSending()
 }
 
@@ -2266,7 +2271,6 @@ func (s *connection) onStreamCompleted(id protocol.StreamID) {
 		s.closeLocal(err)
 	}
 	s.framer.RemoveActiveStream(id)
-	s.windowUpdateQueue.RemoveStream(id)
 }
 
 func (s *connection) onMTUIncreased(mtu protocol.ByteCount) {
