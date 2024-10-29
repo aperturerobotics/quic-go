@@ -75,6 +75,8 @@ var _ = Describe("Server", func() {
 				return context.WithValue(ctx, testConnContextKey("test"), c)
 			},
 		}
+		s.closeCtx, s.closeCancel = context.WithCancel(context.Background())
+		s.graceCtx, s.graceCancel = context.WithCancel(s.closeCtx)
 		origQuicListenAddr = quicListenAddr
 	})
 
@@ -1068,10 +1070,10 @@ var _ = Describe("Server", func() {
 		})
 
 		It("serves a listener", func() {
-			var called int32
+			var called atomic.Bool
 			ln := newMockAddrListener(":443")
 			quicListen = func(conn net.PacketConn, tlsConf *tls.Config, config *quic.Config) (QUICEarlyListener, error) {
-				atomic.StoreInt32(&called, 1)
+				called.Store(true)
 				return ln, nil
 			}
 
@@ -1090,7 +1092,7 @@ var _ = Describe("Server", func() {
 				s.ServeListener(ln)
 			}()
 
-			Consistently(func() int32 { return atomic.LoadInt32(&called) }).Should(Equal(int32(0)))
+			Consistently(called.Load).Should(BeFalse())
 			Consistently(done).ShouldNot(BeClosed())
 			ln.EXPECT().Close().Do(func() error { close(stopAccept); return nil })
 			Expect(s.Close()).To(Succeed())
@@ -1098,14 +1100,14 @@ var _ = Describe("Server", func() {
 		})
 
 		It("serves two listeners", func() {
-			var called int32
+			var called atomic.Bool
 			ln1 := newMockAddrListener(":443")
 			ln2 := newMockAddrListener(":8443")
 			lns := make(chan QUICEarlyListener, 2)
 			lns <- ln1
 			lns <- ln2
 			quicListen = func(c net.PacketConn, tlsConf *tls.Config, config *quic.Config) (QUICEarlyListener, error) {
-				atomic.StoreInt32(&called, 1)
+				called.Store(true)
 				return <-lns, nil
 			}
 
@@ -1137,7 +1139,7 @@ var _ = Describe("Server", func() {
 				s.ServeListener(ln2)
 			}()
 
-			Consistently(func() int32 { return atomic.LoadInt32(&called) }).Should(Equal(int32(0)))
+			Consistently(called.Load).Should(BeFalse())
 			Consistently(done1).ShouldNot(BeClosed())
 			Expect(done2).ToNot(BeClosed())
 			ln1.EXPECT().Close().Do(func() error { close(stopAccept1); return nil })
@@ -1198,7 +1200,7 @@ var _ = Describe("Server", func() {
 	})
 
 	It("closes gracefully", func() {
-		Expect(s.CloseGracefully(0)).To(Succeed())
+		Expect(s.Shutdown(context.Background())).To(Succeed())
 	})
 
 	It("errors when listening fails", func() {

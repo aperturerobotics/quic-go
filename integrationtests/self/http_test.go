@@ -46,7 +46,7 @@ var _ = Describe("HTTP tests", func() {
 	var (
 		mux            *http.ServeMux
 		client         *http.Client
-		rt             *http3.RoundTripper
+		tr             *http3.Transport
 		server         *http3.Server
 		stoppedServing chan struct{}
 		port           int
@@ -112,20 +112,20 @@ var _ = Describe("HTTP tests", func() {
 	})
 
 	AfterEach(func() {
-		Expect(rt.Close()).NotTo(HaveOccurred())
+		Expect(tr.Close()).NotTo(HaveOccurred())
 		Expect(server.Close()).NotTo(HaveOccurred())
 		Eventually(stoppedServing).Should(BeClosed())
 	})
 
 	BeforeEach(func() {
-		rt = &http3.RoundTripper{
+		tr = &http3.Transport{
 			TLSClientConfig: getTLSClientConfigWithoutServerName(),
 			QUICConfig: getQuicConfig(&quic.Config{
 				MaxIdleTimeout: 10 * time.Second,
 			}),
 			DisableCompression: true,
 		}
-		client = &http.Client{Transport: rt}
+		client = &http.Client{Transport: tr}
 	})
 
 	It("closes the connection after idle timeout", func() {
@@ -166,7 +166,7 @@ var _ = Describe("HTTP tests", func() {
 		var dialCounter int
 		testErr := errors.New("test error")
 		cl := http.Client{
-			Transport: &http3.RoundTripper{
+			Transport: &http3.Transport{
 				TLSClientConfig: getTLSClientConfig(),
 				Dial: func(ctx context.Context, addr string, tlsConf *tls.Config, conf *quic.Config) (quic.EarlyConnection, error) {
 					dialCounter++
@@ -355,7 +355,7 @@ var _ = Describe("HTTP tests", func() {
 			gw.Write([]byte("Hello, World!\n"))
 		})
 
-		client.Transport.(*http3.RoundTripper).DisableCompression = false
+		client.Transport.(*http3.Transport).DisableCompression = false
 		resp, err := client.Get(fmt.Sprintf("https://localhost:%d/gzipped/hello", port))
 		Expect(err).ToNot(HaveOccurred())
 		Expect(resp.StatusCode).To(Equal(200))
@@ -484,8 +484,9 @@ var _ = Describe("HTTP tests", func() {
 		)
 		Expect(err).ToNot(HaveOccurred())
 		defer conn.CloseWithError(0, "")
-		rt := http3.SingleDestinationRoundTripper{Connection: conn}
-		str, err := rt.OpenRequestStream(context.Background())
+		tr := http3.Transport{}
+		cc := tr.NewClientConn(conn)
+		str, err := cc.OpenRequestStream(context.Background())
 		Expect(err).ToNot(HaveOccurred())
 		Expect(str.SendRequestHeader(req)).To(Succeed())
 		// make sure the request is received (and not stuck in some buffer, for example)
@@ -677,10 +678,10 @@ var _ = Describe("HTTP tests", func() {
 		)
 		Expect(err).ToNot(HaveOccurred())
 		defer conn.CloseWithError(0, "")
-		rt := http3.SingleDestinationRoundTripper{Connection: conn}
-		hconn := rt.Start()
-		Eventually(hconn.ReceivedSettings(), 5*time.Second, 10*time.Millisecond).Should(BeClosed())
-		settings := hconn.Settings()
+		var tr http3.Transport
+		cc := tr.NewClientConn(conn)
+		Eventually(cc.ReceivedSettings(), 5*time.Second, 10*time.Millisecond).Should(BeClosed())
+		settings := cc.Settings()
 		Expect(settings.EnableExtendedConnect).To(BeTrue())
 		Expect(settings.EnableDatagrams).To(BeFalse())
 		Expect(settings.Other).To(BeEmpty())
@@ -696,7 +697,7 @@ var _ = Describe("HTTP tests", func() {
 			w.WriteHeader(http.StatusOK)
 		})
 
-		rt = &http3.RoundTripper{
+		tr = &http3.Transport{
 			TLSClientConfig: getTLSClientConfigWithoutServerName(),
 			QUICConfig: getQuicConfig(&quic.Config{
 				MaxIdleTimeout:  10 * time.Second,
@@ -708,7 +709,7 @@ var _ = Describe("HTTP tests", func() {
 		req, err := http.NewRequest(http.MethodGet, fmt.Sprintf("https://localhost:%d/settings", port), nil)
 		Expect(err).ToNot(HaveOccurred())
 
-		_, err = rt.RoundTrip(req)
+		_, err = tr.RoundTrip(req)
 		Expect(err).ToNot(HaveOccurred())
 		var settings *http3.Settings
 		Expect(settingsChan).To(Receive(&settings))
@@ -803,11 +804,9 @@ var _ = Describe("HTTP tests", func() {
 			)
 			Expect(err).ToNot(HaveOccurred())
 
-			rt := &http3.SingleDestinationRoundTripper{
-				Connection:      conn,
-				EnableDatagrams: true,
-			}
-			str, err := rt.OpenRequestStream(context.Background())
+			tr := http3.Transport{EnableDatagrams: true}
+			cc := tr.NewClientConn(conn)
+			str, err := cc.OpenRequestStream(context.Background())
 			Expect(err).ToNot(HaveOccurred())
 			u, err := url.Parse(h)
 			Expect(err).ToNot(HaveOccurred())
@@ -981,21 +980,21 @@ var _ = Describe("HTTP tests", func() {
 			tlsConf := getTLSClientConfigWithoutServerName()
 			puts := make(chan string, 10)
 			tlsConf.ClientSessionCache = newClientSessionCache(tls.NewLRUClientSessionCache(10), nil, puts)
-			rt := &http3.RoundTripper{
+			tr := &http3.Transport{
 				TLSClientConfig: tlsConf,
 				QUICConfig: getQuicConfig(&quic.Config{
 					MaxIdleTimeout: 10 * time.Second,
 				}),
 				DisableCompression: true,
 			}
-			defer rt.Close()
+			defer tr.Close()
 
 			mux.HandleFunc("/0rtt", func(w http.ResponseWriter, r *http.Request) {
 				w.Write([]byte(strconv.FormatBool(!r.TLS.HandshakeComplete)))
 			})
 			req, err := http.NewRequest(http3.MethodGet0RTT, fmt.Sprintf("https://localhost:%d/0rtt", proxy.LocalPort()), nil)
 			Expect(err).ToNot(HaveOccurred())
-			rsp, err := rt.RoundTrip(req)
+			rsp, err := tr.RoundTrip(req)
 			Expect(err).ToNot(HaveOccurred())
 			Expect(rsp.StatusCode).To(BeEquivalentTo(200))
 			data, err := io.ReadAll(rsp.Body)
@@ -1004,13 +1003,13 @@ var _ = Describe("HTTP tests", func() {
 			Expect(num0RTTPackets.Load()).To(BeZero())
 			Eventually(puts).Should(Receive())
 
-			rt2 := &http3.RoundTripper{
-				TLSClientConfig:    rt.TLSClientConfig,
-				QUICConfig:         rt.QUICConfig,
+			tr2 := &http3.Transport{
+				TLSClientConfig:    tr.TLSClientConfig,
+				QUICConfig:         tr.QUICConfig,
 				DisableCompression: true,
 			}
-			defer rt2.Close()
-			rsp, err = rt2.RoundTrip(req)
+			defer tr2.Close()
+			rsp, err = tr2.RoundTrip(req)
 			Expect(err).ToNot(HaveOccurred())
 			Expect(rsp.StatusCode).To(BeEquivalentTo(200))
 			data, err = io.ReadAll(rsp.Body)
@@ -1067,5 +1066,96 @@ var _ = Describe("HTTP tests", func() {
 			"Last":        {"value 3"},
 			"Unannounced": {"Surprise!"},
 		})))
+	})
+
+	It("aborts requests on shutdown", func() {
+		mux.HandleFunc("/shutdown", func(w http.ResponseWriter, r *http.Request) {
+			go func() {
+				defer GinkgoRecover()
+				Expect(server.Close()).To(Succeed())
+			}()
+			time.Sleep(scaleDuration(50 * time.Millisecond)) // make sure the server started shutting down
+		})
+
+		_, err := client.Get(fmt.Sprintf("https://localhost:%d/shutdown", port))
+		Expect(err).To(HaveOccurred())
+		var appErr *http3.Error
+		Expect(errors.As(err, &appErr)).To(BeTrue())
+		Expect(appErr.ErrorCode).To(Equal(http3.ErrCodeNoError))
+	})
+
+	It("allows existing requests to complete on graceful shutdown", func() {
+		delay := scaleDuration(100 * time.Millisecond)
+		done := make(chan struct{})
+
+		mux.HandleFunc("/shutdown", func(w http.ResponseWriter, r *http.Request) {
+			go func() {
+				defer GinkgoRecover()
+				defer close(done)
+				Expect(server.Shutdown(context.Background())).To(Succeed())
+				fmt.Println("close gracefully done")
+			}()
+			time.Sleep(delay)
+			w.Write([]byte("shutdown"))
+		})
+
+		ctx, cancel := context.WithTimeout(context.Background(), 3*delay)
+		defer cancel()
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, fmt.Sprintf("https://localhost:%d/shutdown", port), nil)
+		Expect(err).ToNot(HaveOccurred())
+		resp, err := client.Do(req)
+		Expect(err).ToNot(HaveOccurred())
+		Expect(resp.StatusCode).To(Equal(http.StatusOK))
+		body, err := io.ReadAll(resp.Body)
+		Expect(err).ToNot(HaveOccurred())
+		Expect(body).To(Equal([]byte("shutdown")))
+		// manually close the client, since we don't support
+		client.Transport.(*http3.Transport).Close()
+
+		// make sure that Shutdown returned
+		Eventually(done).Should(BeClosed())
+	})
+
+	It("aborts long-lived requests on graceful shutdown", func() {
+		delay := scaleDuration(100 * time.Millisecond)
+		shutdownDone := make(chan struct{})
+		requestChan := make(chan time.Duration, 1)
+
+		mux.HandleFunc("/shutdown", func(w http.ResponseWriter, r *http.Request) {
+			start := time.Now()
+			w.WriteHeader(http.StatusOK)
+			w.(http.Flusher).Flush()
+			go func() {
+				defer GinkgoRecover()
+				ctx, cancel := context.WithTimeout(context.Background(), delay)
+				defer cancel()
+				defer close(shutdownDone)
+				Expect(server.Shutdown(ctx)).To(MatchError(context.DeadlineExceeded))
+			}()
+			for t := range time.NewTicker(delay / 10).C {
+				if _, err := w.Write([]byte(t.String())); err != nil {
+					requestChan <- time.Since(start)
+					return
+				}
+			}
+		})
+
+		start := time.Now()
+		resp, err := client.Get(fmt.Sprintf("https://localhost:%d/shutdown", port))
+		Expect(err).ToNot(HaveOccurred())
+		Expect(resp.StatusCode).To(Equal(http.StatusOK))
+		_, err = io.Copy(io.Discard, resp.Body)
+		Expect(err).To(HaveOccurred())
+		var h3Err *http3.Error
+		Expect(errors.As(err, &h3Err)).To(BeTrue())
+		Expect(h3Err.ErrorCode).To(Equal(http3.ErrCodeNoError))
+		took := time.Since(start)
+		Expect(took).To(BeNumerically("~", delay, delay/2))
+		var requestDuration time.Duration
+		Eventually(requestChan).Should(Receive(&requestDuration))
+		Expect(requestDuration).To(BeNumerically("~", delay, delay/2))
+
+		// make sure that Shutdown returned
+		Eventually(shutdownDone).Should(BeClosed())
 	})
 })
