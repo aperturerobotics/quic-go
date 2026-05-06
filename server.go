@@ -208,7 +208,7 @@ func listenUDP(addr string) (*net.UDPConn, error) {
 	if err != nil {
 		return nil, err
 	}
-	return net.ListenUDP("udp", udpAddr)
+	return listenUDPAddr(udpAddr)
 }
 
 // Listen listens for QUIC connections on a given net.PacketConn.
