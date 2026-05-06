@@ -1,7 +1,6 @@
 package qerr
 
 import (
-	"crypto/tls"
 	"fmt"
 )
 
@@ -39,7 +38,7 @@ func (e TransportErrorCode) Message() string {
 	if !e.IsCryptoError() {
 		return ""
 	}
-	return tls.AlertError(e - 0x100).Error()
+	return cryptoErrorMessage(e)
 }
 
 func (e TransportErrorCode) String() string {
