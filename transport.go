@@ -251,7 +251,7 @@ func (t *Transport) dial(ctx context.Context, addr net.Addr, host string, tlsCon
 		return nil, err
 	}
 	conf = populateConfig(conf)
-	tlsConf = tlsConf.Clone()
+	tlsConf = cloneTLSConfig(tlsConf)
 	setTLSConfigServerName(tlsConf, addr, host)
 	return t.doDial(ctx,
 		newSendConn(t.conn, addr, packetInfo{}, utils.DefaultLogger),

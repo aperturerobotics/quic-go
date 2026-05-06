@@ -681,9 +681,11 @@ func (h *cryptoSetup) Get1RTTOpener() (ShortHeaderOpener, error) {
 }
 
 func (h *cryptoSetup) ConnectionState() ConnectionState {
+	state := h.conn.ConnectionState()
 	return ConnectionState{
-		ConnectionState: h.conn.ConnectionState(),
-		Used0RTT:        h.used0RTT.Load(),
+		ConnectionState:    state,
+		NegotiatedProtocol: state.NegotiatedProtocol,
+		Used0RTT:           h.used0RTT.Load(),
 	}
 }
 

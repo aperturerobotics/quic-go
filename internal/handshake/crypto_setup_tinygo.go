@@ -16,6 +16,10 @@ import (
 
 var errTinyGoQUICUnsupported = errors.New("quic-go: QUIC TLS is unsupported by TinyGo")
 
+type quicVersionContextKey struct{}
+
+var QUICVersionContextKey = &quicVersionContextKey{}
+
 type cryptoSetup struct {
 	initialOpener LongHeaderOpener
 	initialSealer LongHeaderSealer

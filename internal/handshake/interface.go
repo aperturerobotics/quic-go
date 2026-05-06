@@ -56,7 +56,8 @@ type ShortHeaderSealer interface {
 
 type ConnectionState struct {
 	tls.ConnectionState
-	Used0RTT bool
+	NegotiatedProtocol string
+	Used0RTT           bool
 }
 
 // EventKind is the kind of handshake event.
