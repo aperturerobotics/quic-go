@@ -3,7 +3,6 @@ package handshake
 import (
 	"crypto"
 	"crypto/hkdf"
-	"crypto/tls"
 	"fmt"
 
 	"github.com/quic-go/quic-go/internal/protocol"
@@ -21,7 +20,7 @@ const (
 	hkdfLabelIVV2  = "quicv2 iv"
 )
 
-var initialSuite = getCipherSuite(tls.TLS_AES_128_GCM_SHA256)
+var initialSuite = getCipherSuite(tlsAES128GCMSHA256)
 
 // NewInitialAEAD creates a new AEAD for Initial encryption / decryption.
 func NewInitialAEAD(connID protocol.ConnectionID, pers protocol.Perspective, v protocol.Version) (LongHeaderSealer, LongHeaderOpener) {

@@ -5,7 +5,6 @@ import (
 	"crypto/aes"
 	"crypto/cipher"
 	"crypto/fips140"
-	"crypto/tls"
 	"fmt"
 
 	"golang.org/x/crypto/chacha20poly1305"
@@ -14,6 +13,12 @@ import (
 // These cipher suite implementations are copied from the standard library crypto/tls package.
 
 const aeadNonceLength = 12
+
+const (
+	tlsAES128GCMSHA256        uint16 = 0x1301
+	tlsAES256GCMSHA384        uint16 = 0x1302
+	tlsChaCha20Poly1305SHA256 uint16 = 0x1303
+)
 
 type cipherSuite struct {
 	ID     uint16
@@ -26,17 +31,17 @@ func (s cipherSuite) IVLen() int { return aeadNonceLength }
 
 func getCipherSuite(id uint16) cipherSuite {
 	switch id {
-	case tls.TLS_AES_128_GCM_SHA256:
-		return cipherSuite{ID: tls.TLS_AES_128_GCM_SHA256, Hash: crypto.SHA256, KeyLen: 16, AEAD: aeadAESGCMTLS13}
-	case tls.TLS_CHACHA20_POLY1305_SHA256:
+	case tlsAES128GCMSHA256:
+		return cipherSuite{ID: tlsAES128GCMSHA256, Hash: crypto.SHA256, KeyLen: 16, AEAD: aeadAESGCMTLS13}
+	case tlsChaCha20Poly1305SHA256:
 		// The usual convention is to only panic on fips140.Enforced (and not on fips140.Enabled),
 		// but this function panics in the default case anyway, so we might as well panic here.
 		if fips140.Enabled() {
 			panic("tls: TLS_CHACHA20_POLY1305_SHA256 is not allowed in FIPS 140-3 mode")
 		}
-		return cipherSuite{ID: tls.TLS_CHACHA20_POLY1305_SHA256, Hash: crypto.SHA256, KeyLen: 32, AEAD: aeadChaCha20Poly1305}
-	case tls.TLS_AES_256_GCM_SHA384:
-		return cipherSuite{ID: tls.TLS_AES_256_GCM_SHA384, Hash: crypto.SHA384, KeyLen: 32, AEAD: aeadAESGCMTLS13}
+		return cipherSuite{ID: tlsChaCha20Poly1305SHA256, Hash: crypto.SHA256, KeyLen: 32, AEAD: aeadChaCha20Poly1305}
+	case tlsAES256GCMSHA384:
+		return cipherSuite{ID: tlsAES256GCMSHA384, Hash: crypto.SHA384, KeyLen: 32, AEAD: aeadAESGCMTLS13}
 	default:
 		panic(fmt.Sprintf("unknown cypher suite: %d", id))
 	}
