@@ -3,7 +3,6 @@ package handshake
 import (
 	"crypto/aes"
 	"crypto/cipher"
-	"crypto/tls"
 	"encoding/binary"
 	"fmt"
 
@@ -27,9 +26,9 @@ func hkdfHeaderProtectionLabel(v protocol.Version) string {
 func newHeaderProtector(suite cipherSuite, trafficSecret []byte, isLongHeader bool, v protocol.Version) headerProtector {
 	hkdfLabel := hkdfHeaderProtectionLabel(v)
 	switch suite.ID {
-	case tls.TLS_AES_128_GCM_SHA256, tls.TLS_AES_256_GCM_SHA384:
+	case tlsAES128GCMSHA256, tlsAES256GCMSHA384:
 		return newAESHeaderProtector(suite, trafficSecret, isLongHeader, hkdfLabel)
-	case tls.TLS_CHACHA20_POLY1305_SHA256:
+	case tlsChaCha20Poly1305SHA256:
 		return newChaChaHeaderProtector(suite, trafficSecret, isLongHeader, hkdfLabel)
 	default:
 		panic(fmt.Sprintf("Invalid cipher suite id: %d", suite.ID))
