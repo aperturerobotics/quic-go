@@ -1,10 +1,7 @@
 package utils
 
 import (
-	"fmt"
 	"log"
-	"os"
-	"strings"
 	"time"
 )
 
@@ -112,20 +109,4 @@ func (l *defaultLogger) Debug() bool {
 func init() {
 	DefaultLogger = &defaultLogger{}
 	DefaultLogger.SetLogLevel(readLoggingEnv())
-}
-
-func readLoggingEnv() LogLevel {
-	switch strings.ToLower(os.Getenv(logEnv)) {
-	case "":
-		return LogLevelNothing
-	case "debug":
-		return LogLevelDebug
-	case "info":
-		return LogLevelInfo
-	case "error":
-		return LogLevelError
-	default:
-		fmt.Fprintln(os.Stderr, "invalid quic-go log level, see https://github.com/quic-go/quic-go/wiki/Logging")
-		return LogLevelNothing
-	}
 }
