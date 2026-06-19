@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"io"
 	"net"
-	"reflect"
 	"slices"
 	"sync"
 	"sync/atomic"
@@ -1944,7 +1943,7 @@ func (c *Conn) handleFrame(
 	case *wire.HandshakeDoneFrame:
 		err = c.handleHandshakeDoneFrame(rcvTime)
 	default:
-		err = fmt.Errorf("unexpected frame type: %s", reflect.ValueOf(&frame).Elem().Type().Name())
+		err = fmt.Errorf("unexpected frame type: %T", frame)
 	}
 	return pathChallenge, err
 }
