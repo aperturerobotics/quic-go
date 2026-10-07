@@ -1,7 +1,7 @@
 name: ClusterFuzz coverage
 on:
   schedule:
-    - cron: '12 3,11,19 * * *'
+    - cron: "12 3,11,19 * * *"
   workflow_dispatch:
 
 permissions:
